@@ -1,0 +1,18 @@
+{
+  "channels": [
+    "@AuzioMF"
+  ],
+  "resolved_channel_ids": {
+    "@AuzioMF": "UCXWfmXteFx5KLLBnxV0fq7A"
+  },
+  "target_lang": "zh-Hans",
+  "translate_target": "zh-CN",
+  "whisper_model": "small",
+  "max_height": 1080,
+  "keep_releases": 5,
+  "notes": {
+    "channels": "要监控的 YouTube 频道，支持 @handle 或 UC 开头的频道 ID，可多个",
+    "schedule": "workflow cron 为 UTC；当前为 0 19-22 * * * = 北京时间每天 03:00-05:00 每小时检查一次",
+    "secrets": "SERVERCHAN_KEY: Server酱 SendKey（不配置则跳过推送）；YT_COOKIES: 可选，YouTube cookies.txt 内容（下载被 bot 墙时用）"
+  }
+}

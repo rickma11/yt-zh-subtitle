@@ -1,0 +1,7 @@
+work/
+new_videos.json
+__pycache__/
+*.pyc
+.hf/
+cookies.txt
+state.local.json
