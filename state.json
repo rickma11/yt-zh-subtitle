@@ -1,12 +1,5 @@
 {
-  "channels": {
-    "UCXWfmXteFx5KLLBnxV0fq7A": {
-      "last_published": "2026-10-11T18:21:35+00:00",
-      "handle": "@AuzioMF"
-    }
-  },
+  "channels": {},
   "processed": {},
-  "resolved_ids": {
-    "@AuzioMF": "UCXWfmXteFx5KLLBnxV0fq7A"
-  }
+  "resolved_ids": {}
 }
