@@ -116,11 +116,9 @@ def main():
             print(f"[monitor] {handle}: 新视频 {e['video_id']} | "
                   f"{e['published'][:19]} | {e['title'][:60]}")
             new_videos.append({**e, "channel_id": cid, "channel_handle": handle})
-        if entries:
-            channels_state[cid] = {
-                "last_published": max(e["published"] for e in entries),
-                "handle": handle,
-            }
+    # 注意：channels_state 的"已初始化"标记由 run_batch 在处理成功后回写，
+    # 不在 monitor 阶段写——否则处理失败也会吃掉 first_run 保护，导致下轮
+    # 把整个 backlog 全部重跑（2026-10-12 实测教训：15 个视频每个被拦 3 分钟）。
 
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump(new_videos, f, ensure_ascii=False, indent=2)

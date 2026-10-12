@@ -5,3 +5,6 @@ __pycache__/
 .hf/
 cookies.txt
 state.local.json
+.gh_token.txt
+out/
+*.log
