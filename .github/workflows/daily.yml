@@ -57,8 +57,11 @@ jobs:
       - name: Start bgutil PO token provider (optional)
         continue-on-error: true
         run: |
+          set +e
           mkdir -p /tmp/bgutil && cd /tmp/bgutil
-          curl -sL --retry 3 -o bg.tar.gz https://codeload.github.com/Brainicism/bgutil-ytdlp-pot-provider/tar.gz/refs/heads/main
+          # HEAD 符号引用永远指向默认分支（该仓库默认 master，写 main 会 404）
+          curl -sfL --retry 3 --retry-all-errors -o bg.tar.gz \
+            https://codeload.github.com/Brainicism/bgutil-ytdlp-pot-provider/tar.gz/HEAD
           tar xzf bg.tar.gz --strip-components=1
           cd server
           npm ci --silent || npm install --silent
