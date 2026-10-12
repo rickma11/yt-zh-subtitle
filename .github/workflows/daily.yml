@@ -61,19 +61,25 @@ jobs:
           mkdir -p /tmp/bgutil && cd /tmp/bgutil
           # HEAD 符号引用永远指向默认分支（该仓库默认 master，写 main 会 404）
           curl -sfL --retry 3 --retry-all-errors -o bg.tar.gz \
-            https://codeload.github.com/Brainicism/bgutil-ytdlp-pot-provider/tar.gz/HEAD
-          tar xzf bg.tar.gz --strip-components=1
+            https://codeload.github.com/Brainicism/bgutil-ytdlp-pot-provider/tar.gz/HEAD \
+            || { echo "tarball 下载失败，跳过 POT"; exit 0; }
+          tar xzf bg.tar.gz --strip-components=1 \
+            || { echo "解压失败，跳过 POT"; exit 0; }
           cd server
-          npm ci --silent || npm install --silent
-          npm run build --silent
+          # 该仓库无 build 脚本，官方 Dockerfile 用 npx tsc 编译 TS -> build/
+          npm ci --no-audit --no-fund \
+            || { echo "npm ci 失败，跳过 POT"; exit 0; }
+          ./node_modules/.bin/tsc \
+            || { echo "tsc 编译失败，跳过 POT"; tail -20 /tmp/bgutil.log 2>/dev/null; exit 0; }
           nohup node build/main.js --port 4416 > /tmp/bgutil.log 2>&1 &
+          # /get_pot 是 POST 端点，GET 会 404——探活必须用 /ping
           for i in $(seq 1 40); do
-            curl -sf http://127.0.0.1:4416/get_pot > /dev/null 2>&1 && break
+            curl -sf http://127.0.0.1:4416/ping > /dev/null 2>&1 && break
             sleep 2
           done
-          if curl -sf --max-time 20 http://127.0.0.1:4416/get_pot > /tmp/pot_probe.json 2>&1; then
+          if curl -sf --max-time 20 http://127.0.0.1:4416/ping > /tmp/pot_probe.json 2>&1; then
             echo "PO_TOKEN_URL=http://127.0.0.1:4416/get_pot" >> "$GITHUB_ENV"
-            echo "POT server ready: $(head -c 120 /tmp/pot_probe.json)"
+            echo "POT server ready: $(cat /tmp/pot_probe.json)"
           else
             echo "POT server 未就绪，回落 client 轮换模式（不注入 PO_TOKEN_URL）"
             tail -5 /tmp/bgutil.log || true
