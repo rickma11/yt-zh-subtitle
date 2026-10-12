@@ -25,10 +25,22 @@ import translate as tr
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-# player_client 轮换链：datacenter IP 下 default(visionos) 常被 bot 墙，逐个试
-CLIENT_FALLBACKS = ["default", "web", "web_safari", "mweb", "android",
-                    "android_vr", "tv", "tv_embedded"]
+# PO token provider（bgutil）地址；workflow 里配了就对 web 系客户端附加 po_token
+POT_URL = os.environ.get("PO_TOKEN_URL", "").strip()
+_WEB_CLIENTS = ["web", "web_safari", "mweb"]
+_OTHER_CLIENTS = ["default", "android", "android_vr", "tv", "tv_embedded"]
+# player_client 轮换链：datacenter IP 下 default(visionos) 常被 bot 墙，逐个试；
+# 有 POT 时 web 系提前（po_token 只对 web client 有效）
+CLIENT_FALLBACKS = (_WEB_CLIENTS + _OTHER_CLIENTS) if POT_URL else \
+    (["default"] + _WEB_CLIENTS + _OTHER_CLIENTS[1:])
 ZH_DIRECT_LANGS = ["zh-Hans", "zh-Hans-CN", "zh-CN", "zh", "zh-Hant"]
+
+
+def _pot_args(client):
+    """PO token 的 client 前缀固定为 web，仅对 web 系客户端附加。"""
+    if POT_URL and client in _WEB_CLIENTS:
+        return ["--extractor-args", f"youtube:po_token=web+{POT_URL}"]
+    return []
 
 
 def log(*a):
@@ -50,6 +62,7 @@ def ytdlp(args, work, cookies=None, clients=None, retries=1):
     for client in (clients or ["default"]):
         ea = [] if client == "default" else \
             ["--extractor-args", f"youtube:player_client={client}"]
+        ea += _pot_args(client)
         for i in range(retries):
             log(f"  $ yt-dlp[{client}] {' '.join(str(c) for c in args)[:110]}")
             r = subprocess.run(_base(work, cookies) + ea + args)
@@ -65,6 +78,7 @@ def ytdlp_capture(args, cookies=None, clients=None, timeout=300):
     for client in (clients or ["default"]):
         ea = [] if client == "default" else \
             ["--extractor-args", f"youtube:player_client={client}"]
+        ea += _pot_args(client)
         cmd = ([sys.executable, "-m", "yt_dlp", "--no-warnings", "--no-progress",
                 "--user-agent", UA] + (["--cookies", cookies] if cookies else [])
                + ea + args)

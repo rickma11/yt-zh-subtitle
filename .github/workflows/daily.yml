@@ -54,6 +54,21 @@ jobs:
               print("no patch needed")
           EOF
 
+      - name: Start bgutil PO token provider
+        run: |
+          git clone --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider /tmp/bgutil
+          cd /tmp/bgutil/server
+          npm ci --silent
+          npm run build --silent
+          nohup node build/main.js --port 4416 > /tmp/bgutil.log 2>&1 &
+          for i in $(seq 1 40); do
+            curl -sf http://127.0.0.1:4416/get_pot > /dev/null 2>&1 && break
+            sleep 2
+          done
+          echo "--- POT probe ---"
+          curl -s --max-time 20 http://127.0.0.1:4416/get_pot | head -c 300
+          echo
+
       - name: Monitor channels
         id: monitor
         run: python monitor.py
@@ -64,6 +79,7 @@ jobs:
           VIDEO_URL: ${{ inputs.video_url }}
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
           YT_COOKIES: ${{ secrets.YT_COOKIES }}
+          PO_TOKEN_URL: http://127.0.0.1:4416/get_pot
         run: python run_batch.py
 
       - name: Commit state
