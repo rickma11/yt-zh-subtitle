@@ -54,20 +54,27 @@ jobs:
               print("no patch needed")
           EOF
 
-      - name: Start bgutil PO token provider
+      - name: Start bgutil PO token provider (optional)
+        continue-on-error: true
         run: |
-          git clone --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider /tmp/bgutil
-          cd /tmp/bgutil/server
-          npm ci --silent
+          mkdir -p /tmp/bgutil && cd /tmp/bgutil
+          curl -sL --retry 3 -o bg.tar.gz https://codeload.github.com/Brainicism/bgutil-ytdlp-pot-provider/tar.gz/refs/heads/main
+          tar xzf bg.tar.gz --strip-components=1
+          cd server
+          npm ci --silent || npm install --silent
           npm run build --silent
           nohup node build/main.js --port 4416 > /tmp/bgutil.log 2>&1 &
           for i in $(seq 1 40); do
             curl -sf http://127.0.0.1:4416/get_pot > /dev/null 2>&1 && break
             sleep 2
           done
-          echo "--- POT probe ---"
-          curl -s --max-time 20 http://127.0.0.1:4416/get_pot | head -c 300
-          echo
+          if curl -sf --max-time 20 http://127.0.0.1:4416/get_pot > /tmp/pot_probe.json 2>&1; then
+            echo "PO_TOKEN_URL=http://127.0.0.1:4416/get_pot" >> "$GITHUB_ENV"
+            echo "POT server ready: $(head -c 120 /tmp/pot_probe.json)"
+          else
+            echo "POT server 未就绪，回落 client 轮换模式（不注入 PO_TOKEN_URL）"
+            tail -5 /tmp/bgutil.log || true
+          fi
 
       - name: Monitor channels
         id: monitor
@@ -79,7 +86,6 @@ jobs:
           VIDEO_URL: ${{ inputs.video_url }}
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
           YT_COOKIES: ${{ secrets.YT_COOKIES }}
-          PO_TOKEN_URL: http://127.0.0.1:4416/get_pot
         run: python run_batch.py
 
       - name: Commit state
