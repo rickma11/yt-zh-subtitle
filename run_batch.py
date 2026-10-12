@@ -43,7 +43,10 @@ def extract_vid(url):
 
 
 def gh(args, **kw):
-    return subprocess.run(["gh"] + args, capture_output=True, text=True, **kw)
+    env = dict(os.environ)
+    # Actions 里 gh 认 GH_TOKEN；GITHUB_TOKEN 由 Actions 自动注入
+    env["GH_TOKEN"] = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
+    return subprocess.run(["gh"] + args, capture_output=True, text=True, env=env, **kw)
 
 
 def create_release(meta, repo, work):

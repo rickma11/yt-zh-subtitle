@@ -4,9 +4,11 @@
 
 字幕分层（优先级从高到低，前一层成功就不走下一层）：
   T1 zh-direct  : YouTube 直接提供简体/繁体中文字幕（native 或 auto-translate 轨）
-                  —— GitHub Actions 干净 IP 通常能直连 timedtext
   T2 translated : 只有源语言字幕（优先 en）-> Google 翻译成中文
   T3 whisper    : 任何字幕都没有 -> 本地 faster-whisper 转写音频 -> 翻译
+
+所有 yt-dlp 调用都会轮换 player_client（数据中心 IP 常被 bot 墙，换客户端有可能绕过）；
+仍不行时提供 cookies（YT_COOKIES secret 或仓库内 cookies.txt）。
 
 产物：<日期>_<频道>_<标题>.mp4（硬字幕）+ 同名 .zh.srt + meta.json
 """
@@ -21,10 +23,11 @@ import unicodedata
 
 import translate as tr
 
-FFMPEG = "ffmpeg"  # ubuntu-latest 预装；workflow 里仍 apt 安装保险
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-CLIENT_FALLBACKS = ["default", "web_safari", "android", "tv_embedded"]
+# player_client 轮换链：datacenter IP 下 default(visionos) 常被 bot 墙，逐个试
+CLIENT_FALLBACKS = ["default", "web", "web_safari", "mweb", "android",
+                    "android_vr", "tv", "tv_embedded"]
 ZH_DIRECT_LANGS = ["zh-Hans", "zh-Hans-CN", "zh-CN", "zh", "zh-Hant"]
 
 
@@ -32,49 +35,76 @@ def log(*a):
     print(*a, flush=True)
 
 
-def run(cmd, cwd=None, check=False, timeout=7200):
-    log("  $", " ".join(str(c) for c in cmd)[:220])
-    return subprocess.run(cmd, cwd=cwd, check=check, timeout=timeout)
+# ---------- yt-dlp 封装（带 client 轮换 + 可选 cookies） ----------
 
-
-# ---------- yt-dlp 封装 ----------
-
-def ytdlp(args, work, retries=2, cookies=None):
-    base = [sys.executable, "-m", "yt_dlp", "--no-warnings", "--no-progress",
-            "--user-agent", UA, "-P", work]
+def _base(work, cookies):
+    b = [sys.executable, "-m", "yt_dlp", "--no-warnings", "--no-progress",
+         "--user-agent", UA, "-P", work]
     if cookies:
-        base += ["--cookies", cookies]
-    for i in range(retries):
-        r = run(base + args)
-        if r.returncode == 0:
-            return True
-        log(f"    yt-dlp 第 {i+1} 次失败 (rc={r.returncode})")
-        time.sleep(3 * (i + 1))
+        b += ["--cookies", cookies]
+    return b
+
+
+def ytdlp(args, work, cookies=None, clients=None, retries=1):
+    """跑 yt-dlp，按 clients 依次轮换，任一成功返回 True。"""
+    for client in (clients or ["default"]):
+        ea = [] if client == "default" else \
+            ["--extractor-args", f"youtube:player_client={client}"]
+        for i in range(retries):
+            log(f"  $ yt-dlp[{client}] {' '.join(str(c) for c in args)[:110]}")
+            r = subprocess.run(_base(work, cookies) + ea + args)
+            if r.returncode == 0:
+                return True
+            log(f"    yt-dlp 失败 (client={client}, rc={r.returncode})")
+            time.sleep(2 * (i + 1))
     return False
 
 
+def ytdlp_capture(args, cookies=None, clients=None, timeout=300):
+    """跑 yt-dlp 并捕获 stdout（用于 --dump-single-json）。成功返回 stdout。"""
+    for client in (clients or ["default"]):
+        ea = [] if client == "default" else \
+            ["--extractor-args", f"youtube:player_client={client}"]
+        cmd = ([sys.executable, "-m", "yt_dlp", "--no-warnings", "--no-progress",
+                "--user-agent", UA] + (["--cookies", cookies] if cookies else [])
+               + ea + args)
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        except Exception as e:  # noqa: BLE001
+            log(f"    dump 异常 (client={client}): {e}")
+            continue
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout
+        err = (r.stderr or "").strip().splitlines()
+        if err:
+            log(f"    [{client}] {err[-1][:150]}")
+    return None
+
+
 def cookies_path(work):
-    """YT_COOKIES secret 优先，其次仓库里的 cookies.txt"""
+    """YT_COOKIES 环境变量（secret）优先，其次仓库里的 cookies.txt"""
     env = os.environ.get("YT_COOKIES")
     if env:
         p = os.path.join(work, "cookies.txt")
         with open(p, "w", encoding="utf-8") as f:
             f.write(env)
+        log("    使用 YT_COOKIES secret")
         return p
     p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
-    return p if os.path.exists(p) else None
+    if os.path.exists(p):
+        log("    使用仓库内 cookies.txt")
+        return p
+    return None
 
 
 # ---------- 元数据 ----------
 
-def get_metadata(url, work, cookies):
-    try:
-        r = subprocess.run(
-            [sys.executable, "-m", "yt_dlp", "--dump-single-json", "--skip-download",
-             "--user-agent", UA] + (["--cookies", cookies] if cookies else []) + [url],
-            capture_output=True, text=True, timeout=180)
-        if r.returncode == 0 and r.stdout.strip():
-            d = json.loads(r.stdout)
+def get_metadata(url, cookies):
+    out = ytdlp_capture(["--dump-single-json", "--skip-download", url],
+                        cookies=cookies, clients=CLIENT_FALLBACKS)
+    if out:
+        try:
+            d = json.loads(out)
             return {
                 "title": d.get("title") or "",
                 "channel": d.get("channel") or d.get("uploader") or "",
@@ -82,9 +112,9 @@ def get_metadata(url, work, cookies):
                 "subtitles": list((d.get("subtitles") or {}).keys()),
                 "auto_captions": list((d.get("automatic_captions") or {}).keys()),
             }
-    except Exception as e:  # noqa: BLE001
-        log("    dump-single-json 失败，退回 oEmbed:", e)
-    # oEmbed 兜底（免鉴权，返回标题+作者）
+        except Exception as e:  # noqa: BLE001
+            log("    dump-single-json 解析失败:", e)
+    # oEmbed 兜底（免鉴权）
     try:
         import urllib.parse
         import urllib.request
@@ -115,19 +145,17 @@ def parse_srt(path):
         g = [int(x) for x in m.groups()]
         start = g[0] * 3600 + g[1] * 60 + g[2] + g[3] / 1000
         end = g[4] * 3600 + g[5] * 60 + g[6] + g[7] / 1000
-        text = " ".join(lines[2:])
-        res.append({"start": start, "end": end, "text": clean_text(text)})
+        res.append({"start": start, "end": end, "text": clean_text(" ".join(lines[2:]))})
     return [s for s in res if s["text"]]
 
 
 def clean_text(t):
-    t = re.sub(r"<[^>]+>", "", t)          # HTML 标签
+    t = re.sub(r"<[^>]+>", "", t)
     t = t.replace("&gt;", ">").replace("&lt;", "<").replace("&amp;", "&")
     t = re.sub(r"&[a-z]+;", " ", t)
-    t = re.sub(r">>+", "", t)               # ASR 说话人标记
-    t = re.sub(r"\[[^\]]{0,30}\]", "", t)   # [音乐]/[Applause] 等
-    t = re.sub(r"\s+", " ", t).strip()
-    return t
+    t = re.sub(r">>+", "", t)
+    t = re.sub(r"\[[^\]]{0,30}\]", "", t)
+    return re.sub(r"\s+", " ", t).strip()
 
 
 def fmt_ts(t):
@@ -154,13 +182,12 @@ def tier_direct_zh(url, work, cookies):
     ytdlp(["--skip-download", "--write-subs", "--write-auto-subs",
            "--sub-langs", ",".join(ZH_DIRECT_LANGS),
            "--convert-subs", "srt", "-o", "sub.%(ext)s", url],
-          work, retries=2, cookies=cookies)
+          work, cookies=cookies, clients=CLIENT_FALLBACKS)
     found = sorted(f for f in os.listdir(work)
                    if re.search(r"\.zh(-Hans|-Hant|-CN|-TW|-HK)?\.srt$", f))
     if not found:
         log("  [T1] 无中文字幕轨")
         return None
-    # 简体优先
     pick = next((f for f in found if "Hans" in f or f.endswith(".zh.srt")), found[0])
     log(f"  [T1] 命中: {pick}")
     segs = parse_srt(os.path.join(work, pick))
@@ -194,10 +221,10 @@ def tier_translated(url, work, cookies, meta, tl):
         log("  [T2] 无任何源字幕")
         return None
     log(f"  [T2] 使用源字幕 {lang} ({kind}) -> 翻译为 {tl}")
-    args = ["--skip-download", "--sub-langs", lang, "--convert-subs", "srt",
-            "-o", "src.%(ext)s", url]
-    args = ["--write-auto-subs" if kind == "auto" else "--write-subs"] + args
-    ytdlp(args, work, retries=2, cookies=cookies)
+    flag = "--write-auto-subs" if kind == "auto" else "--write-subs"
+    ytdlp([flag, "--skip-download", "--sub-langs", lang,
+           "--convert-subs", "srt", "-o", "src.%(ext)s", url],
+          work, cookies=cookies, clients=CLIENT_FALLBACKS)
     cand = [f for f in os.listdir(work)
             if f.startswith("src.") and f.endswith(".srt")]
     if not cand:
@@ -222,12 +249,13 @@ def tier_translated(url, work, cookies, meta, tl):
 def tier_whisper(url, work, cookies, model_name, tl):
     log("  [T3] 无字幕，下载音频走本地 Whisper 转写 ...")
     ytdlp(["-f", "bestaudio", "--extract-audio", "--audio-format", "wav",
-           "-o", "audio.%(ext)s", url], work, retries=3, cookies=cookies)
+           "-o", "audio.%(ext)s", url],
+          work, cookies=cookies, clients=CLIENT_FALLBACKS, retries=2)
     wav = os.path.join(work, "audio.wav")
     if not os.path.exists(wav):
         cand = [f for f in os.listdir(work) if f.startswith("audio.")]
         if not cand:
-            raise RuntimeError("音频下载失败")
+            raise RuntimeError("音频下载失败（所有 client 均被拦）")
         wav = os.path.join(work, cand[0])
     from faster_whisper import WhisperModel
     model = WhisperModel(model_name, device="cpu", compute_type="int8",
@@ -240,8 +268,7 @@ def tier_whisper(url, work, cookies, model_name, tl):
         txt = clean_text(s.text)
         if txt:
             segs.append({"start": s.start, "end": s.end, "text": txt})
-    log(f"    转写完成: {len(segs)} 段, 语言={info.language}, "
-        f"耗时 {time.time()-t0:.0f}s")
+    log(f"    转写完成: {len(segs)} 段, 语言={info.language}, 耗时 {time.time()-t0:.0f}s")
     if len(segs) < 3:
         raise RuntimeError("Whisper 转写结果过短")
     lang = (info.language or "en")
@@ -257,34 +284,31 @@ def tier_whisper(url, work, cookies, model_name, tl):
 # ---------- 视频下载 ----------
 
 def download_video(url, work, cookies, max_height):
-    for client in CLIENT_FALLBACKS:
-        ea = [] if client == "default" else \
-            ["--extractor-args", f"youtube:player_client={client}"]
-        fmt = f"bv*[height<={max_height}]+ba/b[height<={max_height}]/b"
-        log(f"  下载视频 (client={client}, <= {max_height}p) ...")
-        ok = ytdlp(ea + ["-f", fmt, "--merge-output-format", "mp4",
-                         "-o", "video.%(ext)s", url], work, retries=2, cookies=cookies)
-        vids = [f for f in os.listdir(work)
-                if f.startswith("video.") and f != "video.info.json"]
-        if ok and vids:
-            log(f"    视频就绪: {vids[0]}")
-            return os.path.join(work, vids[0])
-        log(f"    client={client} 下载失败")
-    raise RuntimeError("所有 player_client 均下载失败")
+    fmt = f"bv*[height<={max_height}]+ba/b[height<={max_height}]/b"
+    ok = ytdlp(["-f", fmt, "--merge-output-format", "mp4",
+                "-o", "video.%(ext)s", url],
+               work, cookies=cookies, clients=CLIENT_FALLBACKS, retries=2)
+    vids = [f for f in os.listdir(work)
+            if f.startswith("video.") and f != "video.info.json"]
+    if not ok or not vids:
+        raise RuntimeError("视频下载失败（所有 client 均被拦）")
+    log(f"    视频就绪: {vids[0]}")
+    return os.path.join(work, vids[0])
 
 
 # ---------- 烧录 ----------
 
-def burn(video_path, srt_path, out_path):
+def burn(video_path, out_path):
     log("  ffmpeg 硬字幕烧录 ...")
     vf = ("subtitles=zh.srt:force_style='FontSize=22,"
           "FontName=Noto Sans CJK SC,"
           "PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,"
           "BackColour=&H80000000&,Outline=2,Shadow=1,Bold=1,MarginV=26'")
-    r = run([FFMPEG, "-y", "-i", os.path.basename(video_path), "-vf", vf,
-             "-c:a", "copy", "-c:v", "libx264", "-crf", "20",
-             "-preset", "veryfast", os.path.basename(out_path)],
-            cwd=os.path.dirname(video_path))
+    r = subprocess.run(["ffmpeg", "-y", "-i", os.path.basename(video_path),
+                        "-vf", vf, "-c:a", "copy", "-c:v", "libx264",
+                        "-crf", "20", "-preset", "veryfast",
+                        os.path.basename(out_path)],
+                       cwd=os.path.dirname(video_path))
     if r.returncode != 0 or not os.path.exists(out_path):
         raise RuntimeError("ffmpeg 烧录失败")
 
@@ -315,12 +339,11 @@ def process_video(video, work_root, cfg):
     t0 = time.time()
 
     log(f"\n===== 处理 {vid} | {video.get('title', '')[:60]} =====")
-    meta = get_metadata(url, work, ck)
+    meta = get_metadata(url, ck)
     log(f"  标题: {meta['title'][:70]}")
     log(f"  频道: {meta['channel']} | 时长: {meta.get('duration', 0)}s")
     log(f"  可用字幕: manual={meta['subtitles'][:8]} auto={meta['auto_captions'][:8]}")
 
-    # 分层取中文字幕
     result = tier_direct_zh(url, work, ck)
     if not result:
         result = tier_translated(url, work, ck, meta, tl)
@@ -331,14 +354,13 @@ def process_video(video, work_root, cfg):
     write_srt(segs, os.path.join(work, "zh.srt"))
     log(f"  字幕就绪: {len(segs)} 段 (tier={tier})")
 
-    # 下载视频并烧录
     video_path = download_video(url, work, ck, cfg.get("max_height", 1080))
     date = (video.get("published") or "")[:10].replace("-", "") or \
         time.strftime("%Y%m%d", time.gmtime())
     base = sanitize(f"{date}_{meta['channel']}_{meta['title']}")
     out_mp4 = os.path.join(work, base + ".mp4")
     out_srt = os.path.join(work, base + ".zh.srt")
-    burn(video_path, os.path.join(work, "zh.srt"), out_mp4)
+    burn(video_path, out_mp4)
     shutil.copyfile(os.path.join(work, "zh.srt"), out_srt)
 
     meta_out = {
@@ -362,7 +384,6 @@ def process_video(video, work_root, cfg):
 
 
 if __name__ == "__main__":
-    # 本地单测：python process.py <video_id> [work_root]
     cfg = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                       "config.json"), encoding="utf-8"))
     v = {"video_id": sys.argv[1], "title": "", "published": ""}
