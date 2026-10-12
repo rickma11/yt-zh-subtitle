@@ -300,7 +300,7 @@ def download_video(url, work, cookies, max_height):
 
 def burn(video_path, out_path):
     log("  ffmpeg 硬字幕烧录 ...")
-    vf = ("subtitles=zh.srt:force_style='FontSize=22,"
+    vf = ("subtitles=zh.srt:force_style='FontSize=15,"
           "FontName=Noto Sans CJK SC,"
           "PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,"
           "BackColour=&H80000000&,Outline=2,Shadow=1,Bold=1,MarginV=26'")

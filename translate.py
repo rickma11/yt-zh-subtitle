@@ -6,6 +6,8 @@ import time
 import urllib.parse
 import urllib.request
 
+import polish
+
 ENDPOINT = "https://translate.googleapis.com/translate_a/single"
 
 
@@ -40,4 +42,5 @@ def translate_many(texts, sl="auto", tl="zh-CN", pace=0.12, log_every=25):
         if i % log_every == 0:
             print(f"    [translate] {i}/{len(texts)}")
         time.sleep(pace)
-    return out
+    # 出口统一本地化润色（FC27/足球术语 + 口语化）
+    return [polish.polish(t) for t in out]
