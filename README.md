@@ -54,6 +54,11 @@ python monitor.py                 # 生成 new_videos.json
 python run_batch.py               # 处理 + Release + 推送
 ```
 
+本机发布通道（无需 gh CLI）：把 GitHub PAT（仅需 `public_repo` 权限）写进仓库根目录的
+`.gh_token.txt`（已在 .gitignore 中，不会误提交），run_batch 会自动走 REST API
+创建 Release 并上传 mp4/srt。没有 token 时降级为仅本地产出：成品复制到 `out/` 目录，
+不上传、不推送。
+
 ## 产物位置
 
 - 每个视频一个 GitHub Release：`https://github.com/<owner>/yt-zh-subtitle/releases/tag/v-<video_id>`
@@ -93,4 +98,4 @@ python run_batch.py               # 处理 + Release + 推送
 ### 备选方案（不想用 cookies 时）
 
 - **自托管 runner**：把本机注册为 Actions runner（`runs-on: [self-hosted, win]`），用本机 IP + 代理下载（本机代理出口 IP 实测可正常下载视频，仅字幕接口需 cookies），Whisper 兜底不受影响。
-- **本地定时任务**：在本机直接跑 `monitor.py` + `run_batch.py`（Whisper 转写已实测可完成全片），成品再上传 GitHub Release 发链接。
+- **本地定时任务**：在本机直接跑 `monitor.py` + `run_batch.py`（Whisper 转写已实测可完成全片），配好 `.gh_token.txt` 后成品自动上传 GitHub Release 发链接；配合 Windows 任务计划程序定时执行即可。
