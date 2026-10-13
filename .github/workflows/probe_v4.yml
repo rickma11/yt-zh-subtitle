@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install pycryptodome
-        run: pip install pycryptodome
+        run: python -m pip install pycryptodome
       - name: Run downsub API probe (A)
         env:
           VID: ${{ inputs.video_id }}

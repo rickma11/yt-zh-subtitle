@@ -1,7 +1,7 @@
 // 探针 v4-B：Playwright 从 Actions IP 实测第三方视频下载站（y2mate.mx / y2meta.com）
 // 目标：拿到可直接下载的 googlevideo 直链或触发真实下载
-const { chromium } = require('playwright');
-const { writeFileSync } = require('fs');
+import { chromium } from 'playwright';
+import { writeFileSync } from 'fs';
 
 const VID = process.env.VID || 'KUf0x6FG7p0';
 
