@@ -41,44 +41,33 @@ async function tryOnce(page, fmt) {
   const status = await pollConversion(page, 540000);
   if (status === 'error') throw new Error('notube 返回错误页: ' + page.url());
   if (status === 'timeout') throw new Error('notube 等待转换超时');
-  log('转换完成 / 进入下载页');
+  log('转换完成（Conversion complete / 直链出现）');
 
   const title = await page.locator('.page-title h1').first().textContent().catch(() => null);
   log('标题:', (title || '').trim().slice(0, 60));
 
-  // 若尚未在下载页，点击 Download 进入
-  if (!/\/download\?token=/.test(page.url())) {
-    const dlBtn = page.locator('a:has-text("Download"), button:has-text("Download")').first();
-    if (await dlBtn.count() > 0) await dlBtn.click({ timeout: 15000, noWaitAfter: true }).catch(() => {});
-    await page.waitForTimeout(3000);
-    if (!/\/download\?token=/.test(page.url())) throw new Error('未进入下载页: ' + page.url());
-    log('下载页:', page.url().slice(0, 90));
-  }
-  await page.waitForTimeout(5000);
-
-  // JS 原生点击绿色 Download（精确匹配文本），等待下载事件
-  const dlPromise = page.waitForEvent('download', { timeout: 60000 });
-  const clicked = await page.evaluate(() => {
-    const btns = [...document.querySelectorAll('a, button')];
-    let b = btns.find(x => (x.textContent || '').trim() === 'Download');
-    if (b) { b.click(); return true; }
-    return false;
-  });
-  if (!clicked) throw new Error('下载页找不到 Download 按钮');
-  const dl = await dlPromise;
-  const dlUrl = dl.url();
-  log('直链已捕获:', dlUrl.slice(0, 120));
+  // 直链就嵌在转换页：<a href="https://sXX.notube.net/download.php?token=...&key=...">Download</a>
+  // 注意：notube 当前不会跳转到 /download?token=，直链直接在此页。用浏览器会话点击该 <a> 触发下载事件（带 cookie）。
+  const dlSelector = 'a[href*="download.php?token="]';
+  const dlLink = page.locator(dlSelector).first();
+  if (await dlLink.count() === 0) throw new Error('转换完成后未找到 download.php 直链');
+  const dlUrl = await dlLink.getAttribute('href');
+  log('直链已定位:', (dlUrl || '').slice(0, 120));
 
   const videoPath = `${OUTDIR}/video.mp4`;
+  const dlPromise = page.waitForEvent('download', { timeout: 120000 });
+  await dlLink.click({ timeout: 30000 });
+  const dl = await dlPromise;
   await dl.saveAs(videoPath);
   const size = statSync(videoPath).size;
   log('视频已保存:', videoPath, (size / 1048576).toFixed(1) + 'MB');
   if (size < 1024 * 1024) throw new Error('视频文件异常过小: ' + size + 'B');
-  return { title: (title || '').trim(), dlUrl, size };
+  return { title: (title || '').trim(), dlUrl: dlUrl || '', size };
 }
 
 // 抗导航的轮询等待：notube 转换过程中会多次跳转/重定向，waitForFunction 会因上下文销毁而失败，
 // 故用 page.evaluate 在 try/catch 内轮询，遇到「上下文销毁」类错误则等待后重试，不视为失败。
+// 判定完成：body 出现 "Conversion complete" 文本，或页面已出现 download.php?token= 直链。
 async function pollConversion(page, maxMs) {
   const deadline = Date.now() + maxMs;
   while (Date.now() < deadline) {
@@ -86,10 +75,10 @@ async function pollConversion(page, maxMs) {
       const info = await page.evaluate(() => ({
         url: location.href,
         text: (document.body && document.body.innerText) || '',
+        hasLink: !!document.querySelector('a[href*="download.php?token="]'),
       }));
       if (/[?&]error=/.test(info.url)) return 'error';
-      if (/Conversion complete/i.test(info.text)) return 'done';
-      if (/\/download\?token=/i.test(info.url) || /\bDownload\b/i.test(info.text)) return 'ready';
+      if (/Conversion complete/i.test(info.text) || info.hasLink) return 'done';
     } catch (e) {
       if (/context|destroyed|detached|navigated|Execution/i.test(e.message || '')) {
         await page.waitForTimeout(2000).catch(() => {});
