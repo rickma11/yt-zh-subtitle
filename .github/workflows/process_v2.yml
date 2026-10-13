@@ -150,6 +150,7 @@ jobs:
               -d "desp=${TITLE}%0A%0A[下载链接](${REL_URL})" || true
           fi
         env:
+          GH_TOKEN: ${{ github.token }}
           VIDEO_ID: ${{ steps.resolve.outputs.vid }}
 
       - name: 标记已处理并提交 state.json
