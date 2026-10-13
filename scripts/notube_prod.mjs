@@ -10,7 +10,7 @@ const VID = process.env.VID || 'KUf0x6FG7p0';
 const YT_URL = `https://www.youtube.com/watch?v=${VID}`;
 const OUTDIR = process.env.OUTDIR || 'work';
 const FMT = process.env.FMT || 'mp4hd'; // mp4=360p, mp4hd=720p/1080p
-const MAX_TRIES = 4;
+const MAX_TRIES = 5;
 
 function log(...a) { console.log('[video]', ...a); }
 
@@ -32,28 +32,28 @@ async function tryOnce(page, fmt) {
     const b = document.getElementById('submit-button');
     return b && !b.disabled;
   }, { timeout: 45000 });
-  await submit.click();
+  await submit.click({ noWaitAfter: true, timeout: 60000 }).catch(() => {});
+  await page.waitForLoadState('domcontentloaded', { timeout: 60000 }).catch(() => {});
   log('已提交，等待转换 ...');
 
-  // 同时等待「转换完成」或「错误页」；错误页会跳到 ...&error=2，快速失败以便重试
-  const result = await page.waitForFunction(() => {
-    if (/[?&]error=/.test(location.href)) return 'error';
-    const t = (document.body && document.body.innerText) || '';
-    if (/Conversion complete/i.test(t)) return 'done';
-    return false;
-  }, { timeout: 540000, polling: 4000 }).then(h => h.jsonValue()).catch(() => 'timeout');
-  if (result === 'error') throw new Error('notube 返回错误页: ' + page.url());
-  if (result === 'timeout') throw new Error('notube 等待转换超时');
+  // 抗导航轮询：notube 转换中会多次跳转/重定向，waitForFunction 会因上下文销毁而立即 reject，
+  // 故用 page.evaluate 在 try/catch 内轮询，遇到「上下文销毁」类错误则等待后重试，不视为失败。
+  const status = await pollConversion(page, 540000);
+  if (status === 'error') throw new Error('notube 返回错误页: ' + page.url());
+  if (status === 'timeout') throw new Error('notube 等待转换超时');
+  log('转换完成 / 进入下载页');
 
   const title = await page.locator('.page-title h1').first().textContent().catch(() => null);
-  log('转换完成，标题:', (title || '').trim().slice(0, 60));
+  log('标题:', (title || '').trim().slice(0, 60));
 
-  // 进下载页
-  const dlBtn = page.locator('a:has-text("Download"), button:has-text("Download")').first();
-  if (await dlBtn.count() > 0) await dlBtn.click({ timeout: 15000, noWaitAfter: true }).catch(() => {});
-  await page.waitForTimeout(3000);
-  if (!/\/download\?token=/.test(page.url())) throw new Error('未进入下载页: ' + page.url());
-  log('下载页:', page.url().slice(0, 90));
+  // 若尚未在下载页，点击 Download 进入
+  if (!/\/download\?token=/.test(page.url())) {
+    const dlBtn = page.locator('a:has-text("Download"), button:has-text("Download")').first();
+    if (await dlBtn.count() > 0) await dlBtn.click({ timeout: 15000, noWaitAfter: true }).catch(() => {});
+    await page.waitForTimeout(3000);
+    if (!/\/download\?token=/.test(page.url())) throw new Error('未进入下载页: ' + page.url());
+    log('下载页:', page.url().slice(0, 90));
+  }
   await page.waitForTimeout(5000);
 
   // JS 原生点击绿色 Download（精确匹配文本），等待下载事件
@@ -77,6 +77,31 @@ async function tryOnce(page, fmt) {
   return { title: (title || '').trim(), dlUrl, size };
 }
 
+// 抗导航的轮询等待：notube 转换过程中会多次跳转/重定向，waitForFunction 会因上下文销毁而失败，
+// 故用 page.evaluate 在 try/catch 内轮询，遇到「上下文销毁」类错误则等待后重试，不视为失败。
+async function pollConversion(page, maxMs) {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    try {
+      const info = await page.evaluate(() => ({
+        url: location.href,
+        text: (document.body && document.body.innerText) || '',
+      }));
+      if (/[?&]error=/.test(info.url)) return 'error';
+      if (/Conversion complete/i.test(info.text)) return 'done';
+      if (/\/download\?token=/i.test(info.url) || /\bDownload\b/i.test(info.text)) return 'ready';
+    } catch (e) {
+      if (/context|destroyed|detached|navigated|Execution/i.test(e.message || '')) {
+        await page.waitForTimeout(2000).catch(() => {});
+        continue; // 导航中，短暂等待后重试
+      }
+      throw e;
+    }
+    await page.waitForTimeout(4000);
+  }
+  return 'timeout';
+}
+
 async function main() {
   const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'] });
   const ctx = await browser.newContext({
@@ -98,7 +123,7 @@ async function main() {
       lastErr = e;
       log(`尝试 ${attempt} 失败:`, e.message);
       if (attempt < MAX_TRIES) {
-        const back = 30000 * attempt; // 30s, 60s, 90s 退避，给 notube 队列恢复时间
+        const back = 60000 * attempt; // 60s,120s,180s,240s 退避，给 notube 队列/限流恢复时间
         log(`${back / 1000}s 后重试 ...`);
         await page.waitForTimeout(back).catch(() => {});
       }
