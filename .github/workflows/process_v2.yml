@@ -182,7 +182,7 @@ jobs:
           echo "上传 $F 到 Pixeldrain ..."
           AUTH=""
           if [ -n "$PIXELDRAIN_API_KEY" ]; then
-            AUTH="-u ${PIXELDRAIN_API_KEY}:"
+            AUTH="-u :${PIXELDRAIN_API_KEY}"
             echo "使用账号 API Key 认证上传（文件归属你的 Pixeldrain 账号，可管理/防过期）"
           else
             echo "匿名上传（无需账号，30天无下载自动清理）"
