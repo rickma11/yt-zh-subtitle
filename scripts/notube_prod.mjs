@@ -48,9 +48,11 @@ async function tryOnce(page, fmt) {
 
   // 直链就嵌在转换页：<a href="https://sXX.notube.net/download.php?token=...&key=...">Download</a>
   // 注意：notube 当前不会跳转到 /download?token=，直链直接在此页。用浏览器会话点击该 <a> 触发下载事件（带 cookie）。
+  // 时序：Conversion complete 文本出现后，下载锚点会稍晚才渲染进 DOM，故显式等待其 attached，避免稍早轮询误判“未找到”。
   const dlSelector = 'a[href*="download.php?token="]';
   const dlLink = page.locator(dlSelector).first();
-  if (await dlLink.count() === 0) throw new Error('转换完成后未找到 download.php 直链');
+  await dlLink.waitFor({ state: 'attached', timeout: 30000 }).catch(() => {});
+  if (await dlLink.count() === 0) throw new Error('转换完成后 30s 内未出现 download.php 直链');
   const dlUrl = await dlLink.getAttribute('href');
   log('直链已定位:', (dlUrl || '').slice(0, 120));
 
