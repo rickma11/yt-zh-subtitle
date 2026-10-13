@@ -26,6 +26,7 @@ jobs:
     timeout-minutes: 120
     env:
       SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+      YT_COOKIES: ${{ secrets.YT_COOKIES }}
     steps:
       - uses: actions/checkout@v4
 
