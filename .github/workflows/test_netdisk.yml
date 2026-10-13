@@ -1,0 +1,53 @@
+name: Test 国内网盘上传（隔离测试，不走视频流水线）
+
+on:
+  workflow_dispatch:
+    inputs:
+      providers:
+        description: "要测的网盘（逗号分隔: quark,baidu,aliyun），留空=全部"
+        required: false
+        default: "quark,baidu,aliyun"
+
+jobs:
+  test-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 生成 1KB 测试文件（不下载/不合成视频）
+        run: printf 'netdisk upload test %s\n' "$(date)" > /tmp/netdisk_test.txt && wc -c /tmp/netdisk_test.txt
+
+      - name: 测试 夸克网盘（需 Secret QUARK_COOKIE）
+        if: ${{ contains(inputs.providers, 'quark') && secrets.QUARK_COOKIE != '' }}
+        continue-on-error: true
+        env:
+          QUARK_COOKIE: ${{ secrets.QUARK_COOKIE }}
+        run: |
+          echo "=== 夸克网盘 上传测试 ==="
+          python scripts/netdisk_upload.py quark /tmp/netdisk_test.txt
+
+      - name: 测试 百度网盘（需 Secret BAIDU_BDUSS）
+        if: ${{ contains(inputs.providers, 'baidu') && secrets.BAIDU_BDUSS != '' }}
+        continue-on-error: true
+        env:
+          BAIDU_BDUSS: ${{ secrets.BAIDU_BDUSS }}
+        run: |
+          echo "=== 百度网盘 上传测试 ==="
+          python scripts/netdisk_upload.py baidu /tmp/netdisk_test.txt
+
+      - name: 测试 阿里云盘（需 Secret ALIYUN_REFRESH_TOKEN）
+        if: ${{ contains(inputs.providers, 'aliyun') && secrets.ALIYUN_REFRESH_TOKEN != '' }}
+        continue-on-error: true
+        env:
+          ALIYUN_REFRESH_TOKEN: ${{ secrets.ALIYUN_REFRESH_TOKEN }}
+        run: |
+          echo "=== 阿里云盘 上传测试 ==="
+          python scripts/netdisk_upload.py aliyun /tmp/netdisk_test.txt
+
+      - name: 未配置凭证的网盘（提示）
+        if: ${{ secrets.QUARK_COOKIE == '' && secrets.BAIDU_BDUSS == '' && secrets.ALIYUN_REFRESH_TOKEN == '' }}
+        run: |
+          echo "未检测到任何网盘 Secret，已跳过上传测试。"
+          echo "请在仓库 Settings -> Secrets 添加：QUARK_COOKIE / BAIDU_BDUSS / ALIYUN_REFRESH_TOKEN"
