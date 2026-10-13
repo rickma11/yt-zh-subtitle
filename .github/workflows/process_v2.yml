@@ -1,15 +1,30 @@
-name: Process Video v2 (notube + downsub)
+name: Process Video v2 (notube + downsub + 烧录 + Release)
+
 on:
+  schedule:
+    # UTC 19-22 = 北京时间 03:00-06:00，每小时检查频道更新
+    - cron: "0 19-22 * * *"
   workflow_dispatch:
     inputs:
       video_id:
-        description: 'YouTube video ID'
-        required: true
+        description: '可选：直接处理指定 YouTube 视频 ID（留空则走频道监控）'
+        required: false
+        default: ''
+
+# 关键：gh release create 需要 contents:write 权限，缺失会 403 导致发布静默失败
+permissions:
+  contents: write
+
+concurrency:
+  group: yt-zh-process
+  cancel-in-progress: false
 
 jobs:
   process:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
+    env:
+      SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -31,40 +46,96 @@ jobs:
       - name: Install Python deps
         run: python -m pip install --quiet requests
 
+      - name: Resolve video_id (监控 or 手动)
+        id: resolve
+        run: |
+          if [ -n "${{ inputs.video_id }}" ]; then
+            echo "vid=${{ inputs.video_id }}" >> "$GITHUB_OUTPUT"
+            echo "手动指定视频: ${{ inputs.video_id }}"
+          else
+            python monitor.py
+            VID=$(python -c "import json;d=json.load(open('new_videos.json'));print(d[0]['video_id'] if d else '')" 2>/dev/null || true)
+            echo "监控到最新未处理视频: ${VID:-（无）}"
+            echo "vid=$VID" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Step1 下载视频 (notube)
+        if: steps.resolve.outputs.vid != ''
         env:
-          VID: ${{ inputs.video_id }}
+          VID: ${{ steps.resolve.outputs.vid }}
           OUTDIR: work
         run: node scripts/notube_prod.mjs
 
       - name: Step2 获取字幕 (downsub)
+        if: steps.resolve.outputs.vid != ''
         env:
-          VID: ${{ inputs.video_id }}
+          VID: ${{ steps.resolve.outputs.vid }}
           OUTDIR: work
         run: node scripts/downsub_prod.mjs
 
       - name: Step3 翻译润色 + 烧录
+        if: steps.resolve.outputs.vid != ''
         env:
           OUTDIR: work
           PYTHONUTF8: '1'
         run: python scripts/finalize.py
 
-      - name: Step4 发布 Release + 推送
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VIDEO_ID: ${{ inputs.video_id }}
-          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+      - name: Step4 发布 Release + 推送 Server酱
+        if: steps.resolve.outputs.vid != ''
         run: |
           TITLE=$(python -c "import json;print(json.load(open('work/notube_meta.json')).get('title','video'))" 2>/dev/null || echo "video")
-          SAFE=$(echo "$TITLE" | sed 's/[\/\\:"*?<>|]//g; s/[[:space:]]/_/g' | cut -c1-60)
+          # 安全文件名：按字符截断，避免截断多字节 emoji
+          SAFE=$(python - <<'PY'
+          import json,re
+          try: t=json.load(open('work/notube_meta.json')).get('title','video')
+          except: t='video'
+          t=re.sub(r'[\/\\:"*?<>|]','',t); t=re.sub(r'\s+','_',t)
+          print(t[:60])
+          PY
+          )
           DATE=$(date +%Y%m%d)
           NAME="${DATE}_${SAFE}.mp4"
           mv work/output.mp4 "$NAME"
-          gh release create "auto-${DATE}-${VIDEO_ID}" "$NAME" work/zh.srt \
-            --title "$TITLE" --notes "自动处理：notube 下载 + downsub/翻译字幕烧录" || true
+          TAG="auto-${DATE}-${VIDEO_ID}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，跳过创建"
+          else
+            # 无 || true：真实失败（如文件缺失/权限）必须让 run 报错可见
+            gh release create "$TAG" "$NAME" work/zh.srt \
+              --title "$TITLE" \
+              --notes "自动处理：notube 下载 + downsub/翻译字幕硬烧录"
+          fi
           if [ -n "$SERVERCHAN_KEY" ]; then
-            REL_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/auto-${DATE}-${VIDEO_ID}"
+            REL_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
             curl -s "https://sctapi.ftqq.com/${SERVERCHAN_KEY}.send" \
               -d "title=新视频处理完成" \
               -d "desp=${TITLE}%0A%0A[下载链接](${REL_URL})" || true
+          fi
+        env:
+          VIDEO_ID: ${{ steps.resolve.outputs.vid }}
+
+      - name: 标记已处理并提交 state.json
+        if: steps.resolve.outputs.vid != ''
+        env:
+          VID: ${{ steps.resolve.outputs.vid }}
+        run: |
+          python - <<'PY'
+          import json,os
+          p='state.json'
+          try: s=json.load(open(p))
+          except: s={}
+          s.setdefault('processed',{})[os.environ['VID']]='done'
+          json.dump(s,open(p,'w'),ensure_ascii=False,indent=2)
+          PY
+          git config user.name "yt-zh-bot"
+          git config user.email "yt-zh-bot@users.noreply.github.com"
+          git add state.json
+          if git diff --staged --quiet; then
+            echo "state 无变化，跳过提交"
+          else
+            git commit -m "state: processed $VID"
+            for i in 1 2 3; do
+              git pull --rebase -q && git push -q && break
+              echo "push 重试 $i"; sleep 3
+            done
           fi
