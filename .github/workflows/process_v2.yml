@@ -170,16 +170,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VIDEO_ID: ${{ steps.resolve.outputs.vid }}
 
-      - name: Step4b 上传 Pixeldrain 免费网盘（直链，无需账号）
+      - name: Step4b 上传 Pixeldrain 免费网盘（直链，可选账号 API Key 认证）
         id: pixeldrain
         if: steps.resolve.outputs.vid != ''
         continue-on-error: true
         env:
           NAME_COMPACT: ${{ steps.release.outputs.name_compact }}
+          PIXELDRAIN_API_KEY: ${{ secrets.PIXELDRAIN_API_KEY }}
         run: |
           F="$NAME_COMPACT"
           echo "上传 $F 到 Pixeldrain ..."
-          RESP=$(curl -s --max-time 900 -F "file=@${F}" "https://pixeldrain.com/api/file")
+          AUTH=""
+          if [ -n "$PIXELDRAIN_API_KEY" ]; then
+            AUTH="-u ${PIXELDRAIN_API_KEY}:"
+            echo "使用账号 API Key 认证上传（文件归属你的 Pixeldrain 账号，可管理/防过期）"
+          else
+            echo "匿名上传（无需账号，30天无下载自动清理）"
+          fi
+          RESP=$(curl -s --max-time 900 $AUTH -F "file=@${F}" "https://pixeldrain.com/api/file")
           echo "resp: ${RESP:0:200}"
           ID=$(echo "$RESP" | python -c "import sys,json
           try:
