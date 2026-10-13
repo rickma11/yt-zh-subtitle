@@ -91,8 +91,18 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: Step2 获取字幕 (Whisper 本地转写)
+      - name: Step2a 获取字幕 (DownSub API 首选)
+        id: downsub
         if: steps.resolve.outputs.vid != ''
+        continue-on-error: true
+        env:
+          VID: ${{ steps.resolve.outputs.vid }}
+          OUTDIR: work
+          DOWNSUB_API_KEY: ${{ secrets.DOWNSUB_API_KEY }}
+        run: python scripts/downsub_api.py
+
+      - name: Step2b 获取字幕 (Whisper 兜底)
+        if: steps.resolve.outputs.vid != '' && steps.downsub.outcome != 'success'
         env:
           VID: ${{ steps.resolve.outputs.vid }}
           OUTDIR: work
@@ -111,18 +121,18 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: Step3 翻译润色 + 烧录
+      - name: Step3 翻译润色 + 烧录（完整版 + 720p 手机版）
         if: steps.resolve.outputs.vid != ''
         env:
           OUTDIR: work
           PYTHONUTF8: '1'
         run: python scripts/finalize.py
 
-      - name: Step4 发布 Release + 推送 Server酱
+      - name: Step4 发布 Release（完整版 + 720p + 字幕）
+        id: release
         if: steps.resolve.outputs.vid != ''
         run: |
           TITLE=$(python -c "import json;print(json.load(open('work/notube_meta.json')).get('title','video'))" 2>/dev/null || echo "video")
-          # 安全文件名：按字符截断，避免截断多字节 emoji
           SAFE=$(python - <<'PY'
           import json,re
           try: t=json.load(open('work/notube_meta.json')).get('title','video')
@@ -132,26 +142,89 @@ jobs:
           PY
           )
           DATE=$(date +%Y%m%d)
-          NAME="${DATE}_${SAFE}.mp4"
-          mv work/output.mp4 "$NAME"
+          NAME_FULL="${DATE}_${SAFE}.mp4"
+          NAME_720="${DATE}_${SAFE}_720p.mp4"
+          mv work/output.mp4 "$NAME_FULL"
+          if [ -f work/output_720p.mp4 ]; then
+            mv work/output_720p.mp4 "$NAME_720"
+          else
+            NAME_720="$NAME_FULL"
+            echo "WARN 无 720p 版本，手机版回退为完整版"
+          fi
           TAG="auto-${DATE}-${VIDEO_ID}"
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG 已存在，跳过创建"
           else
             # 无 || true：真实失败（如文件缺失/权限）必须让 run 报错可见
-            gh release create "$TAG" "$NAME" work/zh.srt \
+            gh release create "$TAG" "$NAME_FULL" "$NAME_720" work/zh.srt \
               --title "$TITLE" \
-              --notes "自动处理：notube 下载 + Whisper 转写 + Google 翻译硬烧录"
+              --notes "自动处理：notube 下载 + DownSub/Whisper 字幕 + Google 翻译硬烧录（含完整版与 720p 手机版）"
           fi
-          if [ -n "$SERVERCHAN_KEY" ]; then
-            REL_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
-            curl -s "https://sctapi.ftqq.com/${SERVERCHAN_KEY}.send" \
-              -d "title=新视频处理完成" \
-              -d "desp=${TITLE}%0A%0A[下载链接](${REL_URL})" || true
-          fi
+          echo "name_full=$NAME_FULL" >> "$GITHUB_OUTPUT"
+          echo "name_720=$NAME_720" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "release_url=https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_OUTPUT"
         env:
           GH_TOKEN: ${{ github.token }}
           VIDEO_ID: ${{ steps.resolve.outputs.vid }}
+
+      - name: Step4b 上传 Pixeldrain 免费网盘（直链，无需账号）
+        id: pixeldrain
+        if: steps.resolve.outputs.vid != ''
+        continue-on-error: true
+        env:
+          NAME_720: ${{ steps.release.outputs.name_720 }}
+        run: |
+          F="$NAME_720"
+          echo "上传 $F 到 Pixeldrain ..."
+          RESP=$(curl -s --max-time 900 -F "file=@${F}" "https://pixeldrain.com/api/file")
+          echo "resp: ${RESP:0:200}"
+          ID=$(echo "$RESP" | python -c "import sys,json
+          try:
+              d=json.load(sys.stdin); print(d.get('id',''))
+          except Exception: print('')" 2>/dev/null)
+          if [ -n "$ID" ]; then
+            echo "url=https://pixeldrain.com/u/${ID}" >> "$GITHUB_OUTPUT"
+            echo "OK pixeldrain: $ID"
+          else
+            echo "url=" >> "$GITHUB_OUTPUT"
+            echo "WARN pixeldrain 上传失败"
+          fi
+
+      - name: Step4c 上传 123云盘（国内网盘，可选，需配置 Secrets）
+        id: pan123
+        if: steps.resolve.outputs.vid != '' && secrets.PAN123_CLIENT_ID != '' && secrets.PAN123_CLIENT_SECRET != ''
+        continue-on-error: true
+        env:
+          NAME_720: ${{ steps.release.outputs.name_720 }}
+          PAN123_CLIENT_ID: ${{ secrets.PAN123_CLIENT_ID }}
+          PAN123_CLIENT_SECRET: ${{ secrets.PAN123_CLIENT_SECRET }}
+        run: |
+          python -m pip install --quiet pan123
+          URL=$(python scripts/pan123_upload.py "$NAME_720")
+          echo "url=${URL}" >> "$GITHUB_OUTPUT"
+          echo "pan123 url: ${URL:-（空，上传/分享失败）}"
+
+      - name: Step4d 推送 Server酱（聚合各下载直链）
+        if: steps.resolve.outputs.vid != ''
+        env:
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+          RELEASE_URL: ${{ steps.release.outputs.release_url }}
+          NAME_720: ${{ steps.release.outputs.name_720 }}
+          PIXEL_URL: ${{ steps.pixeldrain.outputs.url }}
+          PAN123_URL: ${{ steps.pan123.outputs.url }}
+          VIDEO_ID: ${{ steps.resolve.outputs.vid }}
+        run: |
+          if [ -z "$SERVERCHAN_KEY" ]; then echo "no SERVERCHAN_KEY, skip"; exit 0; fi
+          TITLE=$(python -c "import json;print(json.load(open('work/notube_meta.json')).get('title','video'))" 2>/dev/null || echo "video")
+          LINKS=""
+          if [ -n "$PIXEL_URL" ]; then LINKS="${LINKS}%0A📦 免费网盘直链(需VPN/代理): ${PIXEL_URL}"; fi
+          if [ -n "$PAN123_URL" ]; then LINKS="${LINKS}%0A📦 国内网盘(123云盘): ${PAN123_URL}"; fi
+          LINKS="${LINKS}%0A📦 GitHub Release(完整版+720p): ${RELEASE_URL}"
+          LINKS="${LINKS}%0A📄 字幕 zh.srt 见上述 Release 资产"
+          curl -s "https://sctapi.ftqq.com/${SERVERCHAN_KEY}.send" \
+            -d "title=新视频处理完成（含手机快速下载）" \
+            -d "desp=${TITLE}${LINKS}" || true
 
       - name: 标记已处理并提交 state.json
         if: steps.resolve.outputs.vid != ''

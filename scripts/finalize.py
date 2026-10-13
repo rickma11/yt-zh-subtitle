@@ -1,6 +1,8 @@
 # 生产：字幕定稿 + 烧录
 # 若 work/zh.srt 不存在（T1 未命中）：读 work/en.srt -> Google 翻译 -> FC27 润色 -> 生成 zh.srt
-# 然后 ffmpeg 硬字幕烧录 -> work/output.mp4
+# 然后 ffmpeg 硬字幕烧录，产出两个版本：
+#   work/output.mp4      完整版（原始分辨率，音轨 copy）
+#   work/output_720p.mp4 手机版（720p，较低码率，体积小、移动端下载快）
 import os, sys, re, html
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -30,6 +32,23 @@ def write_srt(segs, path):
             f.write(f"{i}\n{s['ts']}\n{s['text']}\n\n")
 
 
+def burn(video, srt_abs, out_path, scale=None, fontsize=15, crf=20, audio="copy"):
+    vf = (f"subtitles='{srt_abs}':force_style='FontSize={fontsize},"
+          "FontName=Noto Sans CJK SC,"
+          "PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,"
+          "BackColour=&H80000000&,Outline=2,Shadow=1,Bold=1,MarginV=26'")
+    if scale:
+        vf = f"scale={scale}:flags=lanczos,{vf}"
+    cmd = f'ffmpeg -y -i "{video}" -vf "{vf}" -c:v libx264 -preset medium -crf {crf}'
+    if audio == "copy":
+        cmd += " -c:a copy"
+    else:
+        cmd += f" -c:a aac -b:a {audio} -ar 44100"
+    cmd += f' "{out_path}"'
+    r = os.system(cmd)
+    return r == 0 and os.path.exists(out_path)
+
+
 def main():
     zh_path = os.path.join(WORK, "zh.srt")
     en_path = os.path.join(WORK, "en.srt")
@@ -51,23 +70,31 @@ def main():
     else:
         print("[finalize] T1：已存在 zh.srt，跳过翻译")
 
-    # 烧录
     video = os.path.join(WORK, "video.mp4")
-    out = os.path.join(WORK, "output.mp4")
     if not os.path.exists(video):
         print("FATAL 无 video.mp4")
         sys.exit(1)
     srt_abs = os.path.abspath(zh_path).replace("\\", "/").replace(":", "\\:")
-    vf = (f"subtitles='{srt_abs}':force_style='FontSize=15,"
-          "FontName=Noto Sans CJK SC,"
-          "PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,"
-          "BackColour=&H80000000&,Outline=2,Shadow=1,Bold=1,MarginV=26'")
-    print("[finalize] ffmpeg 烧录 ...")
-    r = os.system(f'ffmpeg -y -i "{video}" -vf "{vf}" -c:v libx264 -preset medium -crf 20 -c:a copy "{out}"')
-    if r != 0 or not os.path.exists(out):
-        print("FATAL ffmpeg 失败")
+
+    # 完整版
+    print("[finalize] ffmpeg 烧录（完整版）...")
+    ok1 = burn(video, srt_abs, os.path.join(WORK, "output.mp4"),
+               scale=None, fontsize=15, crf=20, audio="copy")
+    if not ok1:
+        print("FATAL ffmpeg 完整版失败")
         sys.exit(1)
-    print(f"[finalize] DONE output.mp4 {os.path.getsize(out)/1048576:.1f}MB")
+    full_mb = os.path.getsize(os.path.join(WORK, "output.mp4")) / 1048576
+    print(f"[finalize] DONE 完整版 output.mp4 {full_mb:.1f}MB")
+
+    # 720p 手机版（体积更小，便于移动端快速下载 / 网盘直传）
+    print("[finalize] ffmpeg 烧录（720p 手机版）...")
+    ok2 = burn(video, srt_abs, os.path.join(WORK, "output_720p.mp4"),
+               scale="-2:720", fontsize=20, crf=26, audio="128k")
+    if not ok2:
+        print("WARN 720p 烧录失败，仅保留完整版")
+    else:
+        mb720 = os.path.getsize(os.path.join(WORK, "output_720p.mp4")) / 1048576
+        print(f"[finalize] DONE 720p output_720p.mp4 {mb720:.1f}MB")
 
 
 if __name__ == "__main__":
