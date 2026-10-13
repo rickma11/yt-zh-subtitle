@@ -81,31 +81,48 @@ async function main() {
     log('转换完成！当前页面:', page.url());
     await page.screenshot({ path: `${OUTDIR}/v8_notube_complete.png`, fullPage: false });
 
-    // 记录当前页面所有链接
-    const links = await page.evaluate(() => [...document.querySelectorAll('a')].map(a => ({ href: a.href, text: (a.textContent || '').trim().slice(0, 40) })).filter(x => x.href));
-    writeFileSync(`${OUTDIR}/v8_links.json`, JSON.stringify(links, null, 1));
-    log(`页面共 ${links.length} 个链接`);
-
-    // 找绿色 Download 按钮（排除 "Convert another video"）
+    // 点绿色 Download → 应跳到 /en/download?token=
     const dlBtn = page.locator('a:has-text("Download"), button:has-text("Download")').first();
     if (await dlBtn.count() > 0) {
-      log('点击 Download 按钮');
-      // 同时等待导航或下载
-      await Promise.race([
-        dlBtn.click().then(() => page.waitForTimeout(5000)),
-      ]).catch(e => log('点击异常:', e.message));
-      log('点击后页面:', page.url());
-      await page.screenshot({ path: `${OUTDIR}/v8_after_download.png`, fullPage: false });
-
-      // 如果跳到了带 token 的下载页，再解析里面的直链
-      const html = await page.content();
-      const hrefs = [...html.matchAll(/href="([^"]+\.(?:mp4|webm)[^"]*)"/g)].map(m => m[1]);
-      hrefs.forEach(h => found.downloadUrls.add(h.startsWith('http') ? h : new URL(h, page.url()).href));
-      const gv = [...html.matchAll(/https?:\/\/[^"'\s<>]+googlevideo[^"'\s<>]*/g)].map(m => m[0]);
-      gv.forEach(h => found.downloadUrls.add(h));
-      log(`解析到直链 ${found.downloadUrls.size} 个`);
+      await dlBtn.click({ timeout: 15000, noWaitAfter: true }).catch(e => log('点击异常(继续):', e.message));
     }
-
+    // 等待进入下载页或直接触发下载
+    await page.waitForTimeout(3000);
+    log('当前页面:', page.url());
+    if (/\/download\?token=/.test(page.url())) {
+      log('已进入下载页，等待 JS 渲染 ...');
+      await page.waitForTimeout(5000);
+      await page.screenshot({ path: `${OUTDIR}/v8_download_page.png`, fullPage: false });
+      // 记录所有链接
+      const links2 = await page.evaluate(() => [...document.querySelectorAll('a')].map(a => ({ href: a.href, text: (a.textContent || '').trim().slice(0, 40) })).filter(x => x.href));
+      writeFileSync(`${OUTDIR}/v8_download_links.json`, JSON.stringify(links2, null, 1));
+      // 找直接 .mp4/.webm 链接
+      for (const l of links2) {
+        if (/\.(mp4|webm|mkv)(\?|$)/i.test(l.href)) found.downloadUrls.add(l.href);
+      }
+      // 页面 HTML 里找直链
+      const html = await page.content();
+      [...html.matchAll(/https?:\/\/[^"'\s<>]+(?:googlevideo|\.mp4|\.webm)[^"'\s<>]*/g)].forEach(m => found.downloadUrls.add(m[0]));
+      // 点击下载按钮捕获 download 事件
+      const realDl = page.locator('a:has-text("ownload"), button:has-text("ownload")').first();
+      if (await realDl.count() > 0) {
+        log('点击下载页 Download 按钮');
+        const dlPromise = page.waitForEvent('download', { timeout: 30000 }).catch(() => null);
+        await realDl.click({ timeout: 10000, noWaitAfter: true }).catch(e => log('点击异常(继续):', e.message));
+        const dl = await dlPromise;
+        if (dl) {
+          log('下载事件 URL:', dl.url());
+          found.downloadUrls.add(dl.url());
+          found.downloadFile = dl.url();
+        } else {
+          log('无下载事件，等待后重查直链');
+          await page.waitForTimeout(4000);
+          const html2 = await page.content();
+          [...html2.matchAll(/https?:\/\/[^"'\s<>]+(?:googlevideo|\.mp4|\.webm)[^"'\s<>]*/g)].forEach(m => found.downloadUrls.add(m[0]));
+        }
+      }
+      await page.screenshot({ path: `${OUTDIR}/v8_after_download.png`, fullPage: false });
+    }
     found.finalUrl = page.url();
   } catch (e) {
     log('ERROR:', e.message);
