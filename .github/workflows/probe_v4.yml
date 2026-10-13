@@ -1,0 +1,61 @@
+name: Probe V4
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_id:
+        description: 'YouTube video ID for probe'
+        default: 'KUf0x6FG7p0'
+
+permissions:
+  contents: read
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pycryptodome
+        run: pip install pycryptodome
+      - name: Run downsub API probe (A)
+        env:
+          VID: ${{ inputs.video_id }}
+        run: python scripts/probe_v4_downsub_api.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v4-api-results
+          path: |
+            v4_*.srt
+            v4_downsub_api_results.json
+          if-no-files-found: warn
+
+  video:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Playwright + Chromium
+        run: |
+          npm init -y
+          npm install playwright
+          npx playwright install --with-deps chromium
+      - name: Run video site probe (B)
+        env:
+          VID: ${{ inputs.video_id }}
+        run: node scripts/probe_v4_video.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v4-video-results
+          path: |
+            v4_*.png
+            v4_video_results.json
+            v4_y2mate_video
+            v4_y2meta_video
+          if-no-files-found: warn
