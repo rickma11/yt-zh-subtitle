@@ -1,0 +1,47 @@
+name: Probe V6 Meta
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel_id:
+        description: 'YouTube channel ID'
+        default: 'UCXWfmXteFx5KLLBnxV0fq7A'
+
+permissions:
+  contents: read
+
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test RSS / oEmbed / downsub from Actions IP
+        env:
+          CHANNEL_ID: ${{ inputs.channel_id }}
+        run: |
+          echo "===== 1. YouTube RSS feed ====="
+          curl -s --max-time 20 -w "\nHTTP %{http_code} | %{size_download} bytes\n" \
+            -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36" \
+            "https://www.youtube.com/feeds/videos.xml?channel_id=${CHANNEL_ID}" -o rss.xml
+          head -c 400 rss.xml; echo
+          echo "RSS 中视频条目数: $(grep -c '<entry>' rss.xml || echo 0)"
+          grep -o '<yt:videoId>[^<]*</yt:videoId>' rss.xml | head -5
+          echo "===== 2. oEmbed API ====="
+          curl -s --max-time 20 -w "\nHTTP %{http_code}\n" "https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=KUf0x6FG7p0&format=json" | head -c 300; echo
+          echo "===== 3. downsub API（重试） ====="
+          node -e "
+          const { createCipheriv, createHash, randomBytes } = require('node:crypto');
+          const PASS='zthxw34cdp6wfyxmpad38v52t3hsz6c5';
+          function evp(p,s,k=32,i=16){let d=Buffer.alloc(0),pv=Buffer.alloc(0);while(d.length<k+i){pv=createHash('md5').update(Buffer.concat([pv,p,s])).digest();d=Buffer.concat([d,pv]);}return [d.subarray(0,k),d.subarray(k,k+i)];}
+          function encode(o,key=PASS){const salt=randomBytes(8);const [k,iv]=evp(Buffer.from(key),salt);const pt=Buffer.from(JSON.stringify(o));const c=createCipheriv('aes-256-cbc',k,iv);const ct=Buffer.concat([c.update(pt),c.final()]);const ser=JSON.stringify({ct:ct.toString('base64'),iv:iv.toString('hex'),s:salt.toString('hex')});return Buffer.from(ser).toString('base64').replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
+          const enc=encode('KUf0x6FG7p0');
+          fetch('https://get-info.downsub.com/'+enc,{headers:{'User-Agent':'Mozilla/5.0','Referer':'https://downsub.com/'}})
+            .then(r=>r.text()).then(t=>{console.log('downsub get-info:', t.slice(0,200));})
+            .catch(e=>console.log('downsub ERROR:', String(e).slice(0,150)));
+          "
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v6-meta-results
+          path: rss.xml
+          if-no-files-found: warn

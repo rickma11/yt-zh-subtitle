@@ -16,15 +16,13 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: '3.12'
-      - name: Install pycryptodome
-        run: python -m pip install pycryptodome
+          node-version: '22'
       - name: Run downsub API probe (A)
         env:
           VID: ${{ inputs.video_id }}
-        run: python scripts/probe_v4_downsub_api.py
+        run: node scripts/probe_v4_downsub_api.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: v4-api-results
