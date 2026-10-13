@@ -47,6 +47,20 @@ jobs:
       - name: Install Python deps
         run: python -m pip install --quiet faster-whisper requests
 
+      - name: Patch faster-whisper/PyAV 兼容 (移除 av.open 的 metadata_errors 参数)
+        run: |
+          python - <<'PY'
+          import pathlib, faster_whisper
+          p = pathlib.Path(faster_whisper.__file__).parent / "audio.py"
+          t = p.read_text(encoding="utf-8")
+          if "metadata_errors" in t:
+              t = t.replace(', metadata_errors="ignore"', '').replace(", metadata_errors='ignore'", '')
+              p.write_text(t, encoding="utf-8")
+              print("patched audio.py @", p)
+          else:
+              print("no metadata_errors kwarg, skip")
+          PY
+
       - name: Resolve video_id (监控 or 手动)
         id: resolve
         run: |
