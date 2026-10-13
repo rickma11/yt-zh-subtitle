@@ -26,6 +26,8 @@ jobs:
     timeout-minutes: 120
     env:
       SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+      PAN123_CLIENT_ID: ${{ secrets.PAN123_CLIENT_ID }}
+      PAN123_CLIENT_SECRET: ${{ secrets.PAN123_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v4
 
@@ -193,7 +195,7 @@ jobs:
 
       - name: Step4c 上传 123云盘（国内网盘，可选，需配置 Secrets）
         id: pan123
-        if: steps.resolve.outputs.vid != '' && secrets.PAN123_CLIENT_ID != '' && secrets.PAN123_CLIENT_SECRET != ''
+        if: steps.resolve.outputs.vid != '' && env.PAN123_CLIENT_ID != '' && env.PAN123_CLIENT_SECRET != ''
         continue-on-error: true
         env:
           NAME_720: ${{ steps.release.outputs.name_720 }}
