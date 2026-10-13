@@ -108,8 +108,10 @@ async function main() {
       const navPromise = page.waitForNavigation({ timeout: 30000 }).catch(() => null);
       const clicked = await page.evaluate(() => {
         const btns = [...document.querySelectorAll('a, button')];
-        const b = btns.find(x => /Download/i.test(x.textContent || '') && !/playlist|app/i.test(x.textContent || ''));
-        if (b) { b.click(); return (b.textContent || '').trim().slice(0, 30); }
+        // 精确匹配文本为 "Download" 的元素（绿色下载按钮）
+        let b = btns.find(x => (x.textContent || '').trim() === 'Download');
+        if (!b) b = btns.find(x => /^(Download|下载)\s*$/.test((x.textContent || '').trim()));
+        if (b) { b.click(); return JSON.stringify({ text: (b.textContent || '').trim(), cls: b.className, tag: b.tagName }); }
         return null;
       }).catch(() => null);
       log('JS 点击下载按钮:', clicked);
