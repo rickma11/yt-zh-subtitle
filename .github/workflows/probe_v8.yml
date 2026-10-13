@@ -17,7 +17,9 @@ jobs:
         with:
           node-version: '22'
       - name: Install playwright
-        run: npm install playwright@1.57.0 --no-save
+        run: |
+          npm install playwright@1.57.0 --no-save
+          npx playwright install chromium --with-deps
       - name: Run notube probe v8
         env:
           VID: ${{ inputs.video_id }}
