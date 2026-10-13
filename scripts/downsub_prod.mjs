@@ -2,7 +2,7 @@
 // 优先 zh-Hans（T1 直取中文）；否则 en_auto（T2 源，待翻译）
 // 产物：work/zh.srt（若直取成功）/ work/en.srt + work/subs_meta.json
 import { createCipheriv, createHash, randomBytes } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
 const PASS = 'zthxw34cdp6wfyxmpad38v52t3hsz6c5';
@@ -32,23 +32,50 @@ function encode(obj, key = PASS) {
   return Buffer.from(ser, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-// curl HTTP GET（返回 Buffer）
-function curlBuf(url, timeoutSec = 60) {
-  const r = spawnSync('curl', ['-sS', '-L', '--max-time', String(timeoutSec), '-A', UA, '-H', 'Referer: https://downsub.com/', url], { maxBuffer: 64 * 1024 * 1024 });
-  return r.stdout || Buffer.alloc(0);
+// curl HTTP GET，返回 {status, body}；-w 写状态码到临时文件，body 落盘
+let _seq = 0;
+function curlBuf(url, timeoutSec = 90) {
+  const tmp = `/tmp/ds_body_${process.pid}_${_seq++}.bin`;
+  const wf = `/tmp/ds_code_${process.pid}_${_seq}.txt`;
+  const r = spawnSync('curl', [
+    '-sS', '-L', '--max-time', String(timeoutSec),
+    '-A', UA, '-H', 'Referer: https://downsub.com/',
+    '-o', tmp, '-w', '%{http_code}', url,
+  ], { maxBuffer: 64 * 1024 * 1024 });
+  let status = 0;
+  try { status = parseInt(readFileSync(wf, 'utf8').trim(), 10) || 0; } catch (e) {}
+  let body = Buffer.alloc(0);
+  try { if (existsSync(tmp)) body = readFileSync(tmp); } catch (e) {}
+  return { status, body };
 }
 
-function fetchInfo(vid, retries = 4) {
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function fetchInfo(vid, retries = 5) {
   const enc = encode(vid);
+  let lastStatus = 0;
   for (let i = 0; i < retries; i++) {
-    const body = curlBuf(`https://get-info.downsub.com/${enc}`);
-    if (body.length > 100) {
-      try { return JSON.parse(body.toString('utf8')); } catch (e) { log('JSON 解析失败，重试', i + 1); }
+    const { status, body } = curlBuf(`https://get-info.downsub.com/${enc}`, 60);
+    lastStatus = status;
+    if (status === 200 && body.length > 100) {
+      try {
+        const j = JSON.parse(body.toString('utf8'));
+        // state: 2=就绪; 1=处理中(稍后重试); 0=失败
+        if (j.state === 2) return j;
+        log(`get-info 返回 state=${j.state}（未就绪），退避后重试 ...`);
+      } catch (e) {
+        log('JSON 解析失败，重试', i + 1);
+      }
+    } else {
+      log(`get-info HTTP ${status} 空响应（第 ${i + 1} 次）`);
     }
-    log(`get-info 空/异常（第 ${i + 1} 次），10s 后重试 ...`);
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10000);
+    if (i < retries - 1) {
+      const back = 15000 * Math.pow(2, i); // 15s,30s,60s,120s
+      log(`${back / 1000}s 后重试 ...`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, back);
+    }
   }
-  throw new Error('get-info.downsub.com 不可用');
+  throw new Error(`get-info.downsub.com 不可用 (last HTTP ${lastStatus})`);
 }
 
 function pickTrack(info) {
@@ -66,21 +93,21 @@ async function main() {
 
   if (zh) {
     const url = `https://subtitle.downsub.com/srt/${zh.url}`;
-    const body = curlBuf(url, 90);
-    if (body.length > 200) {
+    const { status, body } = curlBuf(url, 120);
+    if (status === 200 && body.length > 200) {
       writeFileSync(`${OUTDIR}/zh.srt`, body);
       meta.zhBytes = body.length;
       log(`T1 命中：zh-Hans 直取 ${meta.zhBytes}B -> zh.srt`);
-    } else log('zh-Hans 下载为空，降级 T2');
+    } else log(`zh-Hans 下载 HTTP ${status} 为空，降级 T2`);
   }
   if (!meta.zhBytes && en) {
     const url = `https://subtitle.downsub.com/srt/${en.url}`;
-    const body = curlBuf(url, 90);
-    if (body.length > 200) {
+    const { status, body } = curlBuf(url, 120);
+    if (status === 200 && body.length > 200) {
       writeFileSync(`${OUTDIR}/en.srt`, body);
       meta.enBytes = body.length;
       log(`T2 源就绪：en_auto ${meta.enBytes}B -> en.srt（待翻译）`);
-    } else throw new Error('en_auto 下载为空');
+    } else throw new Error(`en_auto 下载 HTTP ${status} 为空`);
   }
   if (!meta.zhBytes && !meta.enBytes) throw new Error('无可用字幕轨');
   writeFileSync(`${OUTDIR}/subs_meta.json`, JSON.stringify(meta, null, 1));

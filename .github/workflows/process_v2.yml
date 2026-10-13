@@ -11,9 +11,10 @@ on:
         required: false
         default: ''
 
-# 关键：gh release create 需要 contents:write 权限，缺失会 403 导致发布静默失败
+# 关键：gh release create 需要 contents:write；上传/下载跨 run 续传产物需要 actions:write
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: yt-zh-process
@@ -59,19 +60,48 @@ jobs:
             echo "vid=$VID" >> "$GITHUB_OUTPUT"
           fi
 
+      # 续传：若上一次同视频已下载成功并上传过产物，本次直接复用，避免重复 10 分钟下载
+      - name: Restore 视频产物 (跨 run)
+        if: steps.resolve.outputs.vid != ''
+        continue-on-error: true
+        run: |
+          mkdir -p work
+          gh artifact download "yt-video-${{ steps.resolve.outputs.vid }}" 2>/dev/null || true
+          if [ -s work/video.mp4 ]; then echo "复用已下载视频"; else rm -f work/video.mp4; fi
+
       - name: Step1 下载视频 (notube)
         if: steps.resolve.outputs.vid != ''
         env:
           VID: ${{ steps.resolve.outputs.vid }}
           OUTDIR: work
-        run: node scripts/notube_prod.mjs
+        run: |
+          if [ -s work/video.mp4 ]; then
+            echo "skip 下载（复用产物）"
+          else
+            node scripts/notube_prod.mjs
+            gh artifact upload "yt-video-${VID}" work/video.mp4
+          fi
+
+      # 续传：若上一次同视频已取到字幕，本次复用
+      - name: Restore 字幕产物 (跨 run)
+        if: steps.resolve.outputs.vid != ''
+        continue-on-error: true
+        run: |
+          mkdir -p work
+          gh artifact download "yt-subs-${{ steps.resolve.outputs.vid }}" 2>/dev/null || true
 
       - name: Step2 获取字幕 (downsub)
         if: steps.resolve.outputs.vid != ''
         env:
           VID: ${{ steps.resolve.outputs.vid }}
           OUTDIR: work
-        run: node scripts/downsub_prod.mjs
+        run: |
+          if [ -s work/zh.srt ] || [ -s work/en.srt ]; then
+            echo "skip 字幕（复用产物）"
+          else
+            node scripts/downsub_prod.mjs
+            gh artifact upload "yt-subs-${VID}" work/zh.srt work/en.srt work/subs_meta.json 2>/dev/null || true
+          fi
 
       - name: Step3 翻译润色 + 烧录
         if: steps.resolve.outputs.vid != ''

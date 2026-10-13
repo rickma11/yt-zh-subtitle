@@ -10,11 +10,11 @@ const VID = process.env.VID || 'KUf0x6FG7p0';
 const YT_URL = `https://www.youtube.com/watch?v=${VID}`;
 const OUTDIR = process.env.OUTDIR || 'work';
 const FMT = process.env.FMT || 'mp4hd'; // mp4=360p, mp4hd=720p/1080p
-const MAX_TRIES = 3;
+const MAX_TRIES = 4;
 
 function log(...a) { console.log('[video]', ...a); }
 
-async function tryOnce(page) {
+async function tryOnce(page, fmt) {
   log('打开 notube.net/en');
   await page.goto('https://notube.net/en', { waitUntil: 'domcontentloaded', timeout: 45000 });
   const accept = page.locator('button:has-text("Accept"), a:has-text("Accept")').first();
@@ -23,8 +23,8 @@ async function tryOnce(page) {
   const input = page.locator('input#keyword');
   await input.waitFor({ state: 'visible', timeout: 20000 });
   await input.fill(YT_URL);
-  await page.selectOption('#myDropdown', FMT);
-  log('URL 已填，格式:', FMT);
+  await page.selectOption('#myDropdown', fmt);
+  log('URL 已填，格式:', fmt);
 
   const submit = page.locator('#submit-button');
   await submit.waitFor({ state: 'visible', timeout: 20000 });
@@ -41,7 +41,7 @@ async function tryOnce(page) {
     const t = (document.body && document.body.innerText) || '';
     if (/Conversion complete/i.test(t)) return 'done';
     return false;
-  }, { timeout: 360000, polling: 4000 }).then(h => h.jsonValue()).catch(() => 'timeout');
+  }, { timeout: 540000, polling: 4000 }).then(h => h.jsonValue()).catch(() => 'timeout');
   if (result === 'error') throw new Error('notube 返回错误页: ' + page.url());
   if (result === 'timeout') throw new Error('notube 等待转换超时');
 
@@ -88,17 +88,19 @@ async function main() {
   let dlUrl = null, title = null, size = 0, ok = false, lastErr = null;
 
   for (let attempt = 1; attempt <= MAX_TRIES && !ok; attempt++) {
+    const fmt = (attempt <= 2) ? FMT : 'mp4'; // 前两次尝试高清，后续降级 360p 加速 notube 转换
     try {
-      log(`=== 尝试 ${attempt}/${MAX_TRIES} ===`);
-      const r = await tryOnce(page);
+      log(`=== 尝试 ${attempt}/${MAX_TRIES} (格式 ${fmt}) ===`);
+      const r = await tryOnce(page, fmt);
       title = r.title; dlUrl = r.dlUrl; size = r.size; ok = true;
       log('下载成功');
     } catch (e) {
       lastErr = e;
       log(`尝试 ${attempt} 失败:`, e.message);
       if (attempt < MAX_TRIES) {
-        log('5s 后重试 ...');
-        await page.waitForTimeout(5000).catch(() => {});
+        const back = 30000 * attempt; // 30s, 60s, 90s 退避，给 notube 队列恢复时间
+        log(`${back / 1000}s 后重试 ...`);
+        await page.waitForTimeout(back).catch(() => {});
       }
     }
   }
