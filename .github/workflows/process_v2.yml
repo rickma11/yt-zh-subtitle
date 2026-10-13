@@ -45,7 +45,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install Python deps
-        run: python -m pip install --quiet requests
+        run: python -m pip install --quiet yt-dlp requests
 
       - name: Resolve video_id (监控 or 手动)
         id: resolve
@@ -77,12 +77,12 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: Step2 获取字幕 (downsub)
+      - name: Step2 获取字幕 (yt-dlp 直连 + downsub 兜底)
         if: steps.resolve.outputs.vid != ''
         env:
           VID: ${{ steps.resolve.outputs.vid }}
           OUTDIR: work
-        run: node scripts/downsub_prod.mjs
+        run: python scripts/get_subs.py
 
       - name: 上传字幕产物 (调试/留存)
         if: steps.resolve.outputs.vid != ''
@@ -126,7 +126,7 @@ jobs:
             # 无 || true：真实失败（如文件缺失/权限）必须让 run 报错可见
             gh release create "$TAG" "$NAME" work/zh.srt \
               --title "$TITLE" \
-              --notes "自动处理：notube 下载 + downsub/翻译字幕硬烧录"
+              --notes "自动处理：notube 下载 + yt-dlp/downsub 字幕 + 翻译硬烧录"
           fi
           if [ -n "$SERVERCHAN_KEY" ]; then
             REL_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
