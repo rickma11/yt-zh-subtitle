@@ -103,23 +103,27 @@ async function main() {
       // 页面 HTML 里找直链
       const html = await page.content();
       [...html.matchAll(/https?:\/\/[^"'\s<>]+(?:googlevideo|\.mp4|\.webm)[^"'\s<>]*/g)].forEach(m => found.downloadUrls.add(m[0]));
-      // 点击下载按钮捕获 download 事件
-      const realDl = page.locator('a:has-text("ownload"), button:has-text("ownload")').first();
-      if (await realDl.count() > 0) {
-        log('点击下载页 Download 按钮');
-        const dlPromise = page.waitForEvent('download', { timeout: 30000 }).catch(() => null);
-        await realDl.click({ timeout: 10000, noWaitAfter: true }).catch(e => log('点击异常(继续):', e.message));
-        const dl = await dlPromise;
-        if (dl) {
-          log('下载事件 URL:', dl.url());
-          found.downloadUrls.add(dl.url());
-          found.downloadFile = dl.url();
-        } else {
-          log('无下载事件，等待后重查直链');
-          await page.waitForTimeout(4000);
-          const html2 = await page.content();
-          [...html2.matchAll(/https?:\/\/[^"'\s<>]+(?:googlevideo|\.mp4|\.webm)[^"'\s<>]*/g)].forEach(m => found.downloadUrls.add(m[0]));
-        }
+      // 点击下载按钮捕获 download 事件（用 JS 原生 click 绕过覆盖层拦截）
+      const dlPromise = page.waitForEvent('download', { timeout: 30000 }).catch(() => null);
+      const navPromise = page.waitForNavigation({ timeout: 30000 }).catch(() => null);
+      const clicked = await page.evaluate(() => {
+        const btns = [...document.querySelectorAll('a, button')];
+        const b = btns.find(x => /Download/i.test(x.textContent || '') && !/playlist|app/i.test(x.textContent || ''));
+        if (b) { b.click(); return (b.textContent || '').trim().slice(0, 30); }
+        return null;
+      }).catch(() => null);
+      log('JS 点击下载按钮:', clicked);
+      const dl = await dlPromise;
+      await navPromise;
+      if (dl) {
+        log('下载事件 URL:', dl.url());
+        found.downloadUrls.add(dl.url());
+        found.downloadFile = dl.url();
+      } else {
+        log('无下载事件，等待后重查直链与请求');
+        await page.waitForTimeout(6000);
+        const html2 = await page.content();
+        [...html2.matchAll(/https?:\/\/[^"'\s<>]+(?:googlevideo|\.mp4|\.webm)[^"'\s<>]*/g)].forEach(m => found.downloadUrls.add(m[0]));
       }
       await page.screenshot({ path: `${OUTDIR}/v8_after_download.png`, fullPage: false });
     }
