@@ -6,6 +6,9 @@ on:
       video_url:
         description: 'YouTube URL for probe'
         default: 'https://www.youtube.com/watch?v=bajG5ZDyydI'
+      script:
+        description: 'Probe script to run'
+        default: 'scripts/probe_thirdparty.mjs'
 
 permissions:
   contents: read
@@ -30,12 +33,14 @@ jobs:
       - name: Run third-party probe
         env:
           YT_URL: ${{ inputs.video_url }}
-        run: node scripts/probe_thirdparty.mjs
+        run: node "${{ inputs.script }}"
 
       - uses: actions/upload-artifact@v4
         with:
           name: probe-results
           path: |
             probe_results.json
+            probe_v2_results.json
             probe_*.png
+            dl_*
           if-no-files-found: warn
