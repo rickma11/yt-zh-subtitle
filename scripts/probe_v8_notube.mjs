@@ -45,22 +45,39 @@ async function main() {
     log('打开 notube.net/en');
     await page.goto('https://notube.net/en', { waitUntil: 'domcontentloaded', timeout: 45000 });
 
+    // cookie 横幅
+    const accept = page.locator('button:has-text("Accept"), a:has-text("Accept")').first();
+    if (await accept.count() > 0) {
+      await accept.click({ timeout: 5000 }).catch(() => {});
+      log('已点 cookie Accept');
+    }
+
     log('填入 URL 到 input#keyword');
     const input = page.locator('input#keyword');
     await input.waitFor({ state: 'visible', timeout: 20000 });
     await input.fill(YT_URL);
 
-    log('提交表单');
-    // 优先点 OK 按钮，失败则回车
+    // 选择 MP4 HD 格式
+    const fmt = process.env.FORMAT || 'mp4hd';
+    await page.selectOption('#myDropdown', fmt).catch(async e => {
+      log('selectOption 失败，尝试点击式:', e.message);
+      await page.click('#fmtBtn').catch(() => {});
+      await page.locator(`[role="option"][data-value="${fmt}"], li:has-text("MP4")`).first().click({ timeout: 5000 }).catch(() => {});
+    });
+    log('格式已选:', fmt);
+
+    log('等待 OK 按钮启用（weight.php 响应）...');
     const submit = page.locator('#submit-button');
-    if (await submit.count() > 0 && await submit.isEnabled().catch(() => false)) {
-      await submit.click();
-    } else {
-      await input.press('Enter');
-    }
+    await submit.waitFor({ state: 'visible', timeout: 20000 });
+    await page.waitForFunction(() => {
+      const b = document.getElementById('submit-button');
+      return b && !b.disabled;
+    }, { timeout: 30000 });
+    log('OK 按钮已启用，点击提交');
+    await submit.click();
 
     log('等待转换完成 ...');
-    await page.waitForSelector('text=Conversion complete', { timeout: 180000 });
+    await page.waitForSelector('text=Conversion complete', { timeout: 300000 });
     log('转换完成！当前页面:', page.url());
     await page.screenshot({ path: `${OUTDIR}/v8_notube_complete.png`, fullPage: false });
 
