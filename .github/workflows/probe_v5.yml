@@ -1,0 +1,36 @@
+name: Probe V5 Video
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_id:
+        description: 'YouTube video ID for probe'
+        default: 'KUf0x6FG7p0'
+
+permissions:
+  contents: read
+
+jobs:
+  video:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Playwright + Chromium
+        run: |
+          npm init -y
+          npm install playwright
+          npx playwright install --with-deps chromium
+      - name: Run multi-site video probe
+        env:
+          VID: ${{ inputs.video_id }}
+        run: node scripts/probe_v5_video.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v5-video-results
+          path: |
+            v5_*
+          if-no-files-found: warn
