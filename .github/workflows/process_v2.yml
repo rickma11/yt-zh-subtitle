@@ -1,9 +1,8 @@
 name: Process Video v2 (notube + downsub + 烧录 + Release)
 
 on:
-  schedule:
-    # UTC 19-22 = 北京时间 03:00-06:00，每小时检查频道更新
-    - cron: "0 19-22 * * *"
+  # 定时触发已迁移到外部 cron-job.org（GitHub 自带 schedule 会延迟，实测拖到 07:12）。
+  # cron-job.org 用 POST 调用本 workflow 的 workflow_dispatch 接口；此处保留 manual 触发入口。
   workflow_dispatch:
     inputs:
       video_id:
