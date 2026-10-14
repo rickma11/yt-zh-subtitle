@@ -193,7 +193,8 @@ jobs:
               d=json.load(sys.stdin); print(d.get('id',''))
           except Exception: print('')" 2>/dev/null)
           if [ -n "$ID" ]; then
-            echo "url=https://pixeldrain.com/u/${ID}" >> "$GITHUB_OUTPUT"
+            # 直链下载（点开即下载，无需经过分享页）：https://pixeldrain.com/api/file/<ID>?download
+            echo "url=https://pixeldrain.com/api/file/${ID}?download" >> "$GITHUB_OUTPUT"
             echo "OK pixeldrain: $ID"
           else
             echo "url=" >> "$GITHUB_OUTPUT"
@@ -227,7 +228,7 @@ jobs:
           if [ -z "$SERVERCHAN_KEY" ]; then echo "no SERVERCHAN_KEY, skip"; exit 0; fi
           TITLE=$(python -c "import json;print(json.load(open('work/notube_meta.json')).get('title','video'))" 2>/dev/null || echo "video")
           LINKS=""
-          if [ -n "$PIXEL_URL" ]; then LINKS="${LINKS}%0A📦 免费网盘直链(需VPN/代理): ${PIXEL_URL}"; fi
+          if [ -n "$PIXEL_URL" ]; then LINKS="${LINKS}%0A📦 免费网盘直链(需VPN/代理, 点开直接下载): ${PIXEL_URL}"; fi
           if [ -n "$PAN123_URL" ]; then LINKS="${LINKS}%0A📦 国内网盘(123云盘): ${PAN123_URL}"; fi
           LINKS="${LINKS}%0A📦 GitHub Release(完整版+1080p精简版): ${RELEASE_URL}"
           LINKS="${LINKS}%0A📄 字幕 zh.srt 见上述 Release 资产"
