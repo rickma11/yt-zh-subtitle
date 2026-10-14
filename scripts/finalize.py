@@ -10,6 +10,9 @@ from translate import translate_many
 from polish import polish
 
 WORK = os.environ.get("OUTDIR", "work")
+# x264 编码速度档：medium(慢/质好) -> veryfast(快 ~2x/字幕视频画质损失极小)。
+# 方案B：全程 veryfast，精简版仍保留 2-pass 保证 ~300MB 体积精确。可用 env X264_PRESET 覆盖。
+PRESET = os.environ.get("X264_PRESET") or "veryfast"
 
 
 def parse_srt(path):
@@ -39,7 +42,7 @@ def burn(video, srt_abs, out_path, scale=None, fontsize=15, crf=20, audio="copy"
           "BackColour=&H80000000&,Outline=2,Shadow=1,Bold=1,MarginV=26'")
     if scale:
         vf = f"scale={scale}:flags=lanczos,{vf}"
-    cmd = f'ffmpeg -y -i "{video}" -vf "{vf}" -c:v libx264 -preset medium -crf {crf}'
+    cmd = f'ffmpeg -y -i "{video}" -vf "{vf}" -c:v libx264 -preset {PRESET} -crf {crf}'
     if audio == "copy":
         cmd += " -c:a copy"
     else:
@@ -90,10 +93,10 @@ def burn_target(video, srt_abs, out_path, target_mb=300, fontsize=15, audio_kbps
     plog = "/tmp/passlog"
     vmax = int(video_kbps * 1.5)
     vbuf = video_kbps * 2
-    cmd1 = (f'ffmpeg -y -i "{video}" -vf "{vf}" -c:v libx264 -preset medium '
+    cmd1 = (f'ffmpeg -y -i "{video}" -vf "{vf}" -c:v libx264 -preset {PRESET} '
             f'-b:v {video_kbps}k -maxrate {vmax}k -bufsize {vbuf}k '
             f'-pass 1 -passlogfile {plog} -f null /dev/null')
-    cmd2 = (f'ffmpeg -y -i "{video}" -vf "{vf}" -c:v libx264 -preset medium '
+    cmd2 = (f'ffmpeg -y -i "{video}" -vf "{vf}" -c:v libx264 -preset {PRESET} '
             f'-b:v {video_kbps}k -maxrate {vmax}k -bufsize {vbuf}k '
             f'-pass 2 -passlogfile {plog} '
             f'-c:a aac -b:a {audio_kbps}k -ar 44100 "{out_path}"')
