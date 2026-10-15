@@ -8,6 +8,7 @@
 - 过滤 YouTube Shorts（只处理普通长视频）
 - 首次运行只取每个频道最新 1 期，避免历史 backlog 洪流
 """
+import datetime
 import json
 import os
 import re
@@ -82,6 +83,55 @@ def is_short(video_id, cache):
         return False
     cache[video_id] = result
     return result
+
+
+# ---- 发布时间 / “今天自然日(北京时间)” 过滤 ----
+# 用户按北京时间(UTC+8)的“自然日”判断“今天更新的视频”。用固定偏移，
+# 不依赖 zoneinfo 数据文件（Windows/runner 都自带标准库即可）。
+BEIJING = datetime.timezone(datetime.timedelta(hours=8))
+
+
+def parse_published(s):
+    """解析 RSS 的 published（ISO 8601，可能带 Z 或 +08:00 偏移）为带时区 datetime；失败返回 None。"""
+    if not s or not str(s).strip():
+        return None
+    t = str(s).strip()
+    if t.endswith("Z"):
+        t = t[:-1] + "+00:00"
+    try:
+        return datetime.datetime.fromisoformat(t)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def get_upload_date(vid):
+    """从视频页 /watch 取 uploadDate（最可靠：YouTube 直接给出带原始时区偏移的精确时间）。
+
+    用途：RSS 的 published 缺失/解析失败，以及 /videos-tab 回退路径（页面只给相对/本地化
+    时间，按视频本地时区显示会踩时区坑）。失败返回 None，调用方据此保守跳过，避免误抓旧视频。
+    """
+    url = f"https://www.youtube.com/watch?v={vid}"
+    try:
+        html = urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
+            urllib.request.Request(url, headers=UA), timeout=20).read().decode("utf-8", "ignore")
+    except Exception as e:  # noqa: BLE001
+        print(f"[monitor] 取发布时间失败 {vid}: {e}")
+        return None
+    m = re.search(r'"uploadDate"\s*:\s*"([^"]+)"', html)
+    if not m:
+        return None
+    return parse_published(m.group(1))
+
+
+def is_today(pub_dt):
+    """pub_dt: 带时区 datetime（无时区则按北京时间解释）。判断是否落在北京时间‘今天’自然日。"""
+    if pub_dt is None:
+        return False
+    if pub_dt.tzinfo is None:
+        pub_bj = pub_dt.replace(tzinfo=BEIJING)
+    else:
+        pub_bj = pub_dt.astimezone(BEIJING)
+    return pub_bj.date() == datetime.datetime.now(BEIJING).date()
 
 
 def resolve_channel_id(handle, cache):
@@ -198,25 +248,39 @@ def main():
             print(f"[monitor] /videos 回退成功，取得 {len(entries)} 个视频")
         raw_candidates = [e for e in entries if e["video_id"] not in processed]
         first_run = cid not in channels_state
-        # 排除 Short：YouTube RSS 现在会把 Shorts 也放进 feed。给 Short 烧字幕
-        # 没有意义，且在 first_run（只取最新 1 期）下会把真正想处理的普通视频
-        # 顶掉——这正是"今天跑成了 Short 而非目标视频"的根因。
+        # 三级过滤：
+        #  1) 排除 Short（RSS 现在会把 Shorts 也放进 feed，没意义烧字幕）
+        #  2) 只处理“今天自然日内（北京时间）更新”的视频——这是用户核心诉求，
+        #     避免某天发布的视频被标记 done 后，又去抓更早的未处理旧片（如 pEmlhqOthHU）
+        #  3) first_run 命中 1 个即停（每次只处理 1 期，靠每日多次 cron 顺次覆盖当天多期）
         candidates = []
         for e in raw_candidates:
-            if is_short(e["video_id"], shorts_checked):
-                print(f"[monitor] {handle}: 跳过 Short {e['video_id']} | {e['title'][:50]}")
+            vid = e["video_id"]
+            if is_short(vid, shorts_checked):
+                print(f"[monitor] {handle}: 跳过 Short {vid} | {e['title'][:50]}")
+                continue
+            # 发布时间：优先用 RSS 的 published；缺失/回退路径无时间则取视频页 uploadDate
+            pub = parse_published(e.get("published", "")) if e.get("published") else None
+            if pub is None:
+                pub = get_upload_date(vid)
+            if pub is None:
+                print(f"[monitor] {handle}: 无法获取 {vid} 发布时间，保守跳过（不抓旧视频）")
+                continue
+            if not is_today(pub):
+                pstr = pub.astimezone(BEIJING).strftime("%Y-%m-%d %H:%M")
+                print(f"[monitor] {handle}: 跳过非今天视频 {vid} | 发布 {pstr}(北京) | {e['title'][:40]}")
                 continue
             candidates.append(e)
             if first_run:
-                break  # first_run 只需 1 个非 Short，命中即停
+                break  # 每次只取 1 个“今天的非 Short”视频，命中即停
         if first_run:
             print(f"[monitor] {handle}: 首次运行，仅取最新 1 期")
         if not candidates:
             print(f"[monitor] {handle}: 无新视频")
             continue
         for e in candidates:
-            print(f"[monitor] {handle}: 新视频 {e['video_id']} | "
-                  f"{e['published'][:19]} | {e['title'][:60]}")
+            ptxt = (e.get("published") or "")[:19] or "（回退路径/无 published）"
+            print(f"[monitor] {handle}: 新视频(今天) {e['video_id']} | {ptxt} | {e['title'][:60]}")
             new_videos.append({**e, "channel_id": cid, "channel_handle": handle})
     # 注意：channels_state 的"已初始化"标记由 run_batch 在处理成功后回写，
     # 不在 monitor 阶段写——否则处理失败也会吃掉 first_run 保护，导致下轮
