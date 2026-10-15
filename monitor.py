@@ -4,11 +4,12 @@
 
 - 解析 @handle -> channel_id（抓频道页的 browseId/externalId/channelId 字段）
 - 拉 RSS（feeds/videos.xml，无需 API key）；RSS 失败时回退 /channel/<id>/videos 标签页
-- 与 state.json 比对，输出未处理的新视频到 new_videos.json
+- 与维护表 video_log.json 比对，只挑“频道最新一条非 Short 且不在维护表中”的视频
+  → 视为更新 → 输出到 new_videos.json
+- 维护表记录每个已处理视频的 id + 处理日期（北京时间），持续累积，用于去重
+  （不依赖被限流的 RSS published 时间）
 - 过滤 YouTube Shorts（只处理普通长视频）
-- 首次运行只取每个频道最新 1 期，避免历史 backlog 洪流
 """
-import datetime
 import json
 import os
 import re
@@ -22,6 +23,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 CONFIG = os.path.join(ROOT, "config.json")
 STATE = os.path.join(ROOT, "state.json")
 OUT = os.path.join(ROOT, "new_videos.json")
+VIDEO_LOG_PATH = os.path.join(ROOT, "video_log.json")
 
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 # YouTube cookies（可选，来自 secret YT_COOKIES）。@AuzioMF 这类频道的 RSS 常被 YouTube 限流
@@ -40,6 +42,20 @@ def load_json(path, default):
             return json.load(f)
     except Exception:  # noqa: BLE001
         return default
+
+
+def load_video_log():
+    """读取维护表（视频id -> {date,title,channel}）。不存在/损坏返回空字典。"""
+    try:
+        with open(VIDEO_LOG_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def save_video_log(data):
+    with open(VIDEO_LOG_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def http_get(url, timeout=30):
@@ -91,53 +107,37 @@ def is_short(video_id, cache):
     return result
 
 
-# ---- 发布时间 / “今天自然日(北京时间)” 过滤 ----
-# 用户按北京时间(UTC+8)的“自然日”判断“今天更新的视频”。用固定偏移，
-# 不依赖 zoneinfo 数据文件（Windows/runner 都自带标准库即可）。
-BEIJING = datetime.timezone(datetime.timedelta(hours=8))
+# 注：原“今天自然日(北京时间)”发布时间过滤已弃用——@AuzioMF 的 RSS 常被限流返回 404，
+# 而 /watch 取 uploadDate 又被 GitHub runner 的 IP 反爬挡掉，拿不到可靠时间。
+# 现改用 video_log.json 维护表做“频道最新视频是否首次出现”的去重（见 select_update / main），
+# 完全不依赖 published。
 
 
-def parse_published(s):
-    """解析 RSS 的 published（ISO 8601，可能带 Z 或 +08:00 偏移）为带时区 datetime；失败返回 None。"""
-    if not s or not str(s).strip():
-        return None
-    t = str(s).strip()
-    if t.endswith("Z"):
-        t = t[:-1] + "+00:00"
-    try:
-        return datetime.datetime.fromisoformat(t)
-    except Exception:  # noqa: BLE001
-        return None
+def select_update(entries, vlog, shorts_checked, handle):
+    """从 entries（最新在前）里挑出‘最新一条非 Short 且不在维护表’的视频。
 
-
-def get_upload_date(vid):
-    """从视频页 /watch 取 uploadDate（最可靠：YouTube 直接给出带原始时区偏移的精确时间）。
-
-    用途：RSS 的 published 缺失/解析失败，以及 /videos-tab 回退路径（页面只给相对/本地化
-    时间，按视频本地时区显示会踩时区坑）。失败返回 None，调用方据此保守跳过，避免误抓旧视频。
+    返回该 entry；若没有符合条件的视频（全是 Short / 最新一条已在表中）返回 None。
+    这正是用户要的判定：最新一条既不是维护表里最新的那条、也不是表里其他的 → 即更新。
     """
-    url = f"https://www.youtube.com/watch?v={vid}"
-    try:
-        html = urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
-            urllib.request.Request(url, headers=UA), timeout=20).read().decode("utf-8", "ignore")
-    except Exception as e:  # noqa: BLE001
-        print(f"[monitor] 取发布时间失败 {vid}: {e}")
+    newest_regular = None
+    for e in entries:
+        vid = e["video_id"]
+        if is_short(vid, shorts_checked):
+            print(f"[monitor] {handle}: 跳过 Short {vid} | {e['title'][:50]}")
+            continue
+        newest_regular = e  # entries 已按最新在前排序，第一条非 Short 即最新普通视频
+        break
+    if newest_regular is None:
+        print(f"[monitor] {handle}: 未发现非 Short 视频，结束")
         return None
-    m = re.search(r'"uploadDate"\s*:\s*"([^"]+)"', html)
-    if not m:
+    vid = newest_regular["video_id"]
+    if vid in vlog:
+        rec = vlog[vid]
+        d = rec.get("date") if isinstance(rec, dict) else rec
+        print(f"[monitor] {handle}: 最新视频 {vid} 已在维护表中({d})，非更新，跳过")
         return None
-    return parse_published(m.group(1))
-
-
-def is_today(pub_dt):
-    """pub_dt: 带时区 datetime（无时区则按北京时间解释）。判断是否落在北京时间‘今天’自然日。"""
-    if pub_dt is None:
-        return False
-    if pub_dt.tzinfo is None:
-        pub_bj = pub_dt.replace(tzinfo=BEIJING)
-    else:
-        pub_bj = pub_dt.astimezone(BEIJING)
-    return pub_bj.date() == datetime.datetime.now(BEIJING).date()
+    print(f"[monitor] {handle}: 检测到更新(最新未处理) {vid} | {newest_regular['title'][:60]}")
+    return newest_regular
 
 
 def resolve_channel_id(handle, cache):
@@ -260,8 +260,6 @@ def main():
     # config 里预置的 ID 也纳入缓存
     for k, v in (cfg.get("resolved_channel_ids") or {}).items():
         resolved.setdefault(k, v)
-    processed = state.setdefault("processed", {})
-    channels_state = state.setdefault("channels", {})
     shorts_checked = state.setdefault("shorts_checked", {})
 
     new_videos = []
@@ -284,45 +282,17 @@ def main():
                 print(f"[monitor] /videos 标签页也为空 {handle}，跳过")
                 continue
             print(f"[monitor] /videos 回退成功，取得 {len(entries)} 个视频")
-        raw_candidates = [e for e in entries if e["video_id"] not in processed]
-        first_run = cid not in channels_state
-        # 三级过滤：
-        #  1) 排除 Short（RSS 现在会把 Shorts 也放进 feed，没意义烧字幕）
-        #  2) 只处理“今天自然日内（北京时间）更新”的视频——这是用户核心诉求，
-        #     避免某天发布的视频被标记 done 后，又去抓更早的未处理旧片（如 pEmlhqOthHU）
-        #  3) first_run 命中 1 个即停（每次只处理 1 期，靠每日多次 cron 顺次覆盖当天多期）
-        candidates = []
-        for e in raw_candidates:
-            vid = e["video_id"]
-            if is_short(vid, shorts_checked):
-                print(f"[monitor] {handle}: 跳过 Short {vid} | {e['title'][:50]}")
-                continue
-            # 发布时间：优先用 RSS 的 published；缺失/回退路径无时间则取视频页 uploadDate
-            pub = parse_published(e.get("published", "")) if e.get("published") else None
-            if pub is None:
-                pub = get_upload_date(vid)
-            if pub is None:
-                print(f"[monitor] {handle}: 无法获取 {vid} 发布时间，保守跳过（不抓旧视频）")
-                continue
-            if not is_today(pub):
-                pstr = pub.astimezone(BEIJING).strftime("%Y-%m-%d %H:%M")
-                print(f"[monitor] {handle}: 跳过非今天视频 {vid} | 发布 {pstr}(北京) | {e['title'][:40]}")
-                continue
-            candidates.append(e)
-            if first_run:
-                break  # 每次只取 1 个“今天的非 Short”视频，命中即停
-        if first_run:
-            print(f"[monitor] {handle}: 首次运行，仅取最新 1 期")
-        if not candidates:
-            print(f"[monitor] {handle}: 无新视频")
+        # ---- 维护表去重：只抓“最新一条非 Short 且不在维护表中”的视频 ----
+        # 维护表 video_log.json 记录每个已处理视频的 id + 处理日期（北京时间），持续累积。
+        # 逻辑：频道最新一条非 Short 视频，若不在维护表里（既不是表里最新的、也不是表里
+        # 任何一条）→ 视为一次更新 → 抓取并写进表；否则跳过。
+        # 不依赖 RSS 的 published（@AuzioMF 的 RSS 常被限流 404、/watch 取时间又被 runner
+        # IP 反爬挡掉），改用“频道最新视频是否首次出现”判定更新，稳定可靠。
+        vlog = load_video_log()
+        chosen = select_update(entries, vlog, shorts_checked, handle)
+        if chosen is None:
             continue
-        for e in candidates:
-            ptxt = (e.get("published") or "")[:19] or "（回退路径/无 published）"
-            print(f"[monitor] {handle}: 新视频(今天) {e['video_id']} | {ptxt} | {e['title'][:60]}")
-            new_videos.append({**e, "channel_id": cid, "channel_handle": handle})
-    # 注意：channels_state 的"已初始化"标记由 run_batch 在处理成功后回写，
-    # 不在 monitor 阶段写——否则处理失败也会吃掉 first_run 保护，导致下轮
-    # 把整个 backlog 全部重跑（2026-10-12 实测教训：15 个视频每个被拦 3 分钟）。
+        new_videos.append({**chosen, "channel_id": cid, "channel_handle": handle})
 
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump(new_videos, f, ensure_ascii=False, indent=2)

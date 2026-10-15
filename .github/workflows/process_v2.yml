@@ -278,20 +278,41 @@ jobs:
           VID: ${{ steps.resolve.outputs.vid }}
         run: |
           python - <<'PY'
-          import json,os
+          import json,os,datetime
+          vid = os.environ['VID']
+          # state.json（兼容保留 processed 标记）
           p='state.json'
           try: s=json.load(open(p))
-          except: s={}
-          s.setdefault('processed',{})[os.environ['VID']]='done'
+          except Exception: s={}
+          s.setdefault('processed',{})[vid]='done'
           json.dump(s,open(p,'w'),ensure_ascii=False,indent=2)
+          # video_log.json 维护表：视频id -> {date, title, channel}
+          # 只记录“最新且首次出现”的视频，持续累积，用于后续去重。
+          lp='video_log.json'
+          try: v=json.load(open(lp))
+          except Exception: v={}
+          title=''
+          cid=''
+          try:
+              nv=json.load(open('new_videos.json'))
+              if nv:
+                  title=nv[0].get('title','')
+                  cid=nv[0].get('channel_id','')
+          except Exception:
+              pass
+          bj=datetime.timezone(datetime.timedelta(hours=8))
+          today=datetime.datetime.now(bj).strftime('%Y-%m-%d')
+          v[vid]={'date':today,'title':title,'channel':cid}
+          json.dump(v,open(lp,'w'),ensure_ascii=False,indent=2)
+          print('video_log updated:',vid,today,title[:40])
           PY
           git config user.name "yt-zh-bot"
           git config user.email "yt-zh-bot@users.noreply.github.com"
-          git add state.json
+          git add state.json video_log.json
           if git diff --staged --quiet; then
             echo "state 无变化，跳过提交"
           else
-            git commit -m "state: processed $VID"
+            git commit -m "state+video_log: processed $VID"
             for i in 1 2 3; do
               git pull --rebase -q && git push -q && break
               echo "push 重试 $i"; sleep 3
