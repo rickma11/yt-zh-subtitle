@@ -129,7 +129,34 @@ jobs:
           PYTHONUTF8: '1'
         run: python scripts/finalize.py
 
-      - name: Step4 发布 Release（完整版 + 1080p精简版 + 字幕）
+      - name: Step3.5 获取视频封面 (thumbnail)
+        id: cover
+        if: steps.resolve.outputs.vid != ''
+        env:
+          VID: ${{ steps.resolve.outputs.vid }}
+        run: |
+          mkdir -p work
+          COVER_URL=""
+          for NAME in maxresdefault sddefault hqdefault; do
+            U="https://i.ytimg.com/vi/${VID}/${NAME}.jpg"
+            if curl -fsSL --max-time 30 -o "work/_cover_try.jpg" "$U"; then
+              # 校验 JPEG magic bytes（ff d8），排除 maxres 缺失时的 404/占位图
+              if [ "$(head -c 2 work/_cover_try.jpg | od -An -tx1 | tr -d ' \n')" = "ffd8" ]; then
+                mv work/_cover_try.jpg work/cover.jpg
+                COVER_URL="$U"
+                echo "封面 OK: $U"
+                break
+              fi
+            fi
+            rm -f work/_cover_try.jpg
+          done
+          if [ -z "$COVER_URL" ]; then
+            echo "WARN 未取到有效封面，回退 hqdefault 链接"
+            COVER_URL="https://i.ytimg.com/vi/${VID}/hqdefault.jpg"
+          fi
+          echo "url=$COVER_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Step4 发布 Release（完整版 + 1080p精简版 + 字幕 + 封面）
         id: release
         if: steps.resolve.outputs.vid != ''
         run: |
@@ -153,13 +180,15 @@ jobs:
             echo "WARN 无 1080p精简版，手机版回退为完整版"
           fi
           TAG="auto-${DATE}-${VIDEO_ID}"
+          COVER_ARG=""
+          if [ -f work/cover.jpg ]; then COVER_ARG="work/cover.jpg"; fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG 已存在，跳过创建"
           else
             # 无 || true：真实失败（如文件缺失/权限）必须让 run 报错可见
-            gh release create "$TAG" "$NAME_FULL" "$NAME_COMPACT" work/zh.srt \
+            gh release create "$TAG" "$NAME_FULL" "$NAME_COMPACT" work/zh.srt $COVER_ARG \
               --title "$TITLE" \
-              --notes "自动处理：notube 下载 + DownSub/Whisper 字幕 + Google 翻译硬烧录（含完整版与 1080p精简版）"
+              --notes "自动处理：notube 下载 + DownSub/Whisper 字幕 + Google 翻译硬烧录（含完整版、1080p精简版与封面）"
           fi
           echo "name_full=$NAME_FULL" >> "$GITHUB_OUTPUT"
           echo "name_compact=$NAME_COMPACT" >> "$GITHUB_OUTPUT"
@@ -224,16 +253,21 @@ jobs:
           PIXEL_URL: ${{ steps.pixeldrain.outputs.url }}
           PAN123_URL: ${{ steps.pan123.outputs.url }}
           VIDEO_ID: ${{ steps.resolve.outputs.vid }}
+          COVER_URL: ${{ steps.cover.outputs.url }}
         run: |
           if [ -z "$SERVERCHAN_KEY" ]; then echo "no SERVERCHAN_KEY, skip"; exit 0; fi
           TITLE=$(python -c "import json;print(json.load(open('work/notube_meta.json')).get('title','video'))" 2>/dev/null || echo "video")
           LINKS=""
+          if [ -n "$COVER_URL" ]; then
+            LINKS="${LINKS}%0A🖼️ 封面图: ${COVER_URL}"
+            LINKS="${LINKS}%0A![封面](${COVER_URL})"
+          fi
           if [ -n "$PIXEL_URL" ]; then LINKS="${LINKS}%0A📦 免费网盘直链(需VPN/代理, 点开直接下载): ${PIXEL_URL}"; fi
           if [ -n "$PAN123_URL" ]; then LINKS="${LINKS}%0A📦 国内网盘(123云盘): ${PAN123_URL}"; fi
-          LINKS="${LINKS}%0A📦 GitHub Release(完整版+1080p精简版): ${RELEASE_URL}"
+          LINKS="${LINKS}%0A📦 GitHub Release(完整版+1080p精简版+封面): ${RELEASE_URL}"
           LINKS="${LINKS}%0A📄 字幕 zh.srt 见上述 Release 资产"
           curl -s "https://sctapi.ftqq.com/${SERVERCHAN_KEY}.send" \
-            -d "title=新视频处理完成（含手机快速下载）" \
+            -d "title=新视频处理完成（含封面+手机快速下载）" \
             -d "desp=${TITLE}${LINKS}" || true
 
       - name: 标记已处理并提交 state.json

@@ -11,6 +11,7 @@ import json
 import os
 import re
 import sys
+import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 
@@ -39,6 +40,47 @@ def http_get(url, timeout=30):
     req = urllib.request.Request(url, headers=UA)
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read()
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """不跟随 3xx，用于识别 Short。"""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(newurl, code, msg, headers, fp)
+
+
+def is_short(video_id, cache):
+    """判断 video_id 是否为 YouTube Short。
+
+    依据：GET https://www.youtube.com/shorts/<id>
+      - 普通视频 -> 302 重定向到 /watch?v=<id>
+      - Short     -> 直接 200 返回
+    结果写入 cache（state["shorts_checked"]）避免重复探测；
+    探测异常（429/5xx/超时）时返回 False（保留该视频、不缓存，下轮重试）——
+    宁可漏过一个 Short，也不误伤正常视频。
+    """
+    if video_id in cache:
+        return cache[video_id]
+    url = f"https://www.youtube.com/shorts/{video_id}"
+    try:
+        opener = urllib.request.build_opener(_NoRedirect(), urllib.request.ProxyHandler({}))
+        with opener.open(urllib.request.Request(url, headers=UA), timeout=20) as r:
+            result = True  # 直接 200 -> Short
+    except urllib.error.HTTPError as e:
+        loc = e.headers.get("Location", "")
+        if 300 <= e.code < 400 and "watch?v=" in loc:
+            result = False
+        elif e.code == 404:
+            result = False
+        else:
+            print(f"[monitor] Short 探测异常 {video_id}: HTTP {e.code}"
+                  f"（默认按非 Short 处理，不缓存，下轮重试）")
+            return False
+    except Exception as e:  # noqa: BLE001
+        print(f"[monitor] Short 探测异常 {video_id}: {e}"
+              f"（默认按非 Short 处理，不缓存，下轮重试）")
+        return False
+    cache[video_id] = result
+    return result
 
 
 def resolve_channel_id(handle, cache):
@@ -91,6 +133,7 @@ def main():
         resolved.setdefault(k, v)
     processed = state.setdefault("processed", {})
     channels_state = state.setdefault("channels", {})
+    shorts_checked = state.setdefault("shorts_checked", {})
 
     new_videos = []
     for handle in cfg.get("channels", []):
@@ -104,10 +147,20 @@ def main():
         except Exception as e:  # noqa: BLE001
             print(f"[monitor] RSS 拉取失败 {handle} ({cid}): {e}")
             continue
-        candidates = [e for e in entries if e["video_id"] not in processed]
+        raw_candidates = [e for e in entries if e["video_id"] not in processed]
         first_run = cid not in channels_state
+        # 排除 Short：YouTube RSS 现在会把 Shorts 也放进 feed。给 Short 烧字幕
+        # 没有意义，且在 first_run（只取最新 1 期）下会把真正想处理的普通视频
+        # 顶掉——这正是"今天跑成了 Short 而非目标视频"的根因。
+        candidates = []
+        for e in raw_candidates:
+            if is_short(e["video_id"], shorts_checked):
+                print(f"[monitor] {handle}: 跳过 Short {e['video_id']} | {e['title'][:50]}")
+                continue
+            candidates.append(e)
+            if first_run:
+                break  # first_run 只需 1 个非 Short，命中即停
         if first_run:
-            candidates = candidates[:1]
             print(f"[monitor] {handle}: 首次运行，仅取最新 1 期")
         if not candidates:
             print(f"[monitor] {handle}: 无新视频")
