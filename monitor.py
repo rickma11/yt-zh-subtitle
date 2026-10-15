@@ -28,7 +28,8 @@ VIDEO_LOG_PATH = os.path.join(ROOT, "video_log.json")
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 # YouTube cookies（可选，来自 secret YT_COOKIES）。@AuzioMF 这类频道的 RSS 常被 YouTube 限流
 # 返回 404、/watch 取 uploadDate 也被 runner IP 反爬；带登录态 cookie 可显著提升命中率。
-COOKIE = os.environ.get("YT_COOKIES", "")
+# secret 末尾常带换行符，必须strip，否则 urllib 报 "Invalid header value"。
+COOKIE = (os.environ.get("YT_COOKIES", "") or "").replace("\r", "").replace("\n", "").strip()
 NS = {
     "yt": "http://www.youtube.com/xml/schemas/2015",
     "media": "http://search.yahoo.com/mrss/",
