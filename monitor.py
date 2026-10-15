@@ -3,8 +3,9 @@
 """监控 YouTube 频道更新。
 
 - 解析 @handle -> channel_id（抓频道页的 browseId/externalId/channelId 字段）
-- 拉 RSS（feeds/videos.xml，无需 API key）
+- 拉 RSS（feeds/videos.xml，无需 API key）；RSS 失败时回退 /channel/<id>/videos 标签页
 - 与 state.json 比对，输出未处理的新视频到 new_videos.json
+- 过滤 YouTube Shorts（只处理普通长视频）
 - 首次运行只取每个频道最新 1 期，避免历史 backlog 洪流
 """
 import json
@@ -124,6 +125,46 @@ def fetch_rss(channel_id):
     return entries
 
 
+def _unescape_json_str(s):
+    """YouTube 把 page JSON 里的标题用 JSON 转义（如 \\u0026 表示 &）。用 json.loads 还原。"""
+    try:
+        return json.loads('"' + s + '"')
+    except Exception:  # noqa: BLE001
+        return s.replace("\\u0026", "&")
+
+
+def fetch_videos_tab(channel_id):
+    """RSS 兜底：直接抓 /channel/<id>/videos 标签页。
+
+    适用场景：YouTube 对单个频道的 feeds/videos.xml 偶发返回 404/500（本机与 GH runner
+    都遇到过，但 /videos 页面本身 200）。新 UI 每个视频块是
+    lockupViewModel(contentId) + 紧随其后的 lockupMetadataViewModel(title)，页面顺序 = 最新在前。
+    返回与 fetch_rss 同结构的 entries（published 兜底为空，因 tab 页只给相对时间）。
+    """
+    url = f"https://www.youtube.com/channel/{channel_id}/videos"
+    html = http_get(url).decode("utf-8", "ignore")
+    cid_pat = r'"contentId":"([\w-]{11})","contentType":"LOCKUP_CONTENT_TYPE_VIDEO"'
+    title_pat = r'lockupMetadataViewModel":\{"title":\{"content":"((?:[^"\\]|\\.){1,200})"\}'
+    cids = re.findall(cid_pat, html)
+    titles = re.findall(title_pat, html)
+    n = min(len(cids), len(titles))
+    seen = set()
+    entries = []
+    for i in range(n):
+        vid = cids[i]
+        if not vid or vid in seen:
+            continue
+        seen.add(vid)
+        title = _unescape_json_str(titles[i]) or "(无标题)"
+        entries.append({
+            "video_id": vid,
+            "title": title,
+            "published": "",
+            "channel": "",
+        })
+    return entries
+
+
 def main():
     cfg = load_json(CONFIG, {})
     state = load_json(STATE, {"channels": {}, "processed": {}, "resolved_ids": {}})
@@ -145,8 +186,16 @@ def main():
         try:
             entries = fetch_rss(cid)
         except Exception as e:  # noqa: BLE001
-            print(f"[monitor] RSS 拉取失败 {handle} ({cid}): {e}")
-            continue
+            print(f"[monitor] RSS 拉取失败 {handle} ({cid}): {e} —— 回退 /videos 标签页")
+            try:
+                entries = fetch_videos_tab(cid)
+            except Exception as e2:  # noqa: BLE001
+                print(f"[monitor] /videos 回退也失败 {handle}: {e2}，跳过")
+                continue
+            if not entries:
+                print(f"[monitor] /videos 标签页也为空 {handle}，跳过")
+                continue
+            print(f"[monitor] /videos 回退成功，取得 {len(entries)} 个视频")
         raw_candidates = [e for e in entries if e["video_id"] not in processed]
         first_run = cid not in channels_state
         # 排除 Short：YouTube RSS 现在会把 Shorts 也放进 feed。给 Short 烧字幕
