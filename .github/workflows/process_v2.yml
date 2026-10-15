@@ -64,6 +64,8 @@ jobs:
 
       - name: Resolve video_id (监控 or 手动)
         id: resolve
+        env:
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
         run: |
           if [ -n "${{ inputs.video_id }}" ]; then
             echo "vid=${{ inputs.video_id }}" >> "$GITHUB_OUTPUT"

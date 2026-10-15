@@ -24,6 +24,9 @@ STATE = os.path.join(ROOT, "state.json")
 OUT = os.path.join(ROOT, "new_videos.json")
 
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+# YouTube cookies（可选，来自 secret YT_COOKIES）。@AuzioMF 这类频道的 RSS 常被 YouTube 限流
+# 返回 404、/watch 取 uploadDate 也被 runner IP 反爬；带登录态 cookie 可显著提升命中率。
+COOKIE = os.environ.get("YT_COOKIES", "")
 NS = {
     "yt": "http://www.youtube.com/xml/schemas/2015",
     "media": "http://search.yahoo.com/mrss/",
@@ -41,6 +44,8 @@ def load_json(path, default):
 
 def http_get(url, timeout=30):
     req = urllib.request.Request(url, headers=UA)
+    if COOKIE:
+        req.add_header("Cookie", COOKIE)
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read()
 
