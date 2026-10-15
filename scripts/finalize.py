@@ -2,7 +2,7 @@
 # 若 work/zh.srt 不存在（T1 未命中）：读 work/en.srt -> Google 翻译 -> FC27 润色 -> 生成 zh.srt
 # 然后 ffmpeg 硬字幕烧录，产出两个版本：
 #   work/output.mp4         完整版（原始分辨率，音轨 copy，体积大，走 GitHub Release 桌面下载）
-#   work/output_1080p.mp4   手机精简版（保持 1080p，2-pass 目标码率压到 ~300MB，便于移动端/网盘快速下载）
+#   work/output_1080p.mp4   手机精简版（保持 1080p，单 pass 目标码率压到 ~300MB，便于移动端/网盘快速下载）
 import os, sys, re, html, json, subprocess
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -11,7 +11,7 @@ from polish import polish
 
 WORK = os.environ.get("OUTDIR", "work")
 # x264 编码速度档：medium(慢/质好) -> veryfast(快 ~2x/字幕视频画质损失极小)。
-# 方案B：全程 veryfast，精简版仍保留 2-pass 保证 ~300MB 体积精确。可用 env X264_PRESET 覆盖。
+# 全程 veryfast；精简版改为单 pass ABR（见 burn_target），兼顾速度与 ~300MB 预算。可用 env X264_PRESET 覆盖。
 PRESET = os.environ.get("X264_PRESET") or "veryfast"
 
 
@@ -71,44 +71,36 @@ def probe(video):
 
 
 def burn_target(video, srt_abs, out_path, target_mb=300, fontsize=15, audio_kbps=128):
-    """保持 1080p（源更高则降到 1080），用 2-pass 目标码率把总体积压到 ~target_mb MB。
-    按视频时长动态算码率：10~15 分钟都贴近 300MB 预算。"""
+    """保持 1080p（源更高则降到 1080），单 pass 目标码率把总体积压到 ~target_mb MB。
+
+    为什么不用 2-pass：2-pass 仅为精确命中体积预算，但要多编码一遍。在 2 核 runner 上，
+    长视频（如 45min 开包视频）会因「完整版1遍 + 1080p 2遍 = 3 遍重编码」逼近 job 120min
+    超时（实测 run #27 卡死在 Step3 73min、撞超时）。单 pass 速度约快一倍，体积略超预算
+    （手机/网盘仍可接受），质量足够。"""
     dur, h = probe(video)
-    if dur <= 0:
-        print("WARN 无法探测时长，回退单 pass CRF 编码")
-        return burn(video, srt_abs, out_path, scale=None, fontsize=fontsize,
-                    crf=24, audio=f"{audio_kbps}k")
-    target_bytes = target_mb * 1024 * 1024
-    audio_bytes = (audio_kbps * 1000 / 8) * dur
-    # 预留 2% 容器/muxing 开销
-    video_bytes = target_bytes - audio_bytes - int(target_bytes * 0.02)
-    if video_bytes < target_bytes * 0.5:
-        video_bytes = int(target_bytes * 0.9)
-    video_kbps = max(300, int(video_bytes * 8 / dur / 1000))
     scale = "scale=-2:1080:flags=lanczos," if h > 1080 else ""
     vf = (f"{scale}subtitles='{srt_abs}':force_style='FontSize={fontsize},"
           "FontName=Noto Sans CJK SC,"
           "PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,"
           "BackColour=&H80000000&,Outline=2,Shadow=1,Bold=1,MarginV=26'")
-    plog = "/tmp/passlog"
-    vmax = int(video_kbps * 1.5)
-    vbuf = video_kbps * 2
-    cmd1 = (f'ffmpeg -y -i "{video}" -vf "{vf}" -c:v libx264 -preset {PRESET} '
-            f'-b:v {video_kbps}k -maxrate {vmax}k -bufsize {vbuf}k '
-            f'-pass 1 -passlogfile {plog} -f null /dev/null')
-    cmd2 = (f'ffmpeg -y -i "{video}" -vf "{vf}" -c:v libx264 -preset {PRESET} '
-            f'-b:v {video_kbps}k -maxrate {vmax}k -bufsize {vbuf}k '
-            f'-pass 2 -passlogfile {plog} '
-            f'-c:a aac -b:a {audio_kbps}k -ar 44100 "{out_path}"')
-    print(f"[finalize] 2-pass 目标: {target_mb}MB / {dur:.0f}s -> 视频码率 ~{video_kbps}kbps")
-    r1 = os.system(cmd1)
-    if r1 != 0:
-        print("WARN pass1 失败，回退单 pass CRF")
-        return burn(video, srt_abs, out_path,
-                    scale=(None if h <= 1080 else "-2:1080"),
-                    fontsize=fontsize, crf=24, audio=f"{audio_kbps}k")
-    r2 = os.system(cmd2)
-    return r2 == 0 and os.path.exists(out_path)
+    if dur > 0:
+        # 单 pass ABR（非 2-pass）：按预算算 -b:v，加 maxrate/bufsize 约束波动，只编码一遍
+        target_bytes = target_mb * 1024 * 1024
+        audio_bytes = (audio_kbps * 1000 / 8) * dur
+        video_bytes = target_bytes - audio_bytes - int(target_bytes * 0.02)
+        video_kbps = max(400, int(video_bytes * 8 / dur / 1000))
+        vmax = int(video_kbps * 1.5)
+        vbuf = video_kbps * 2
+        cmd = (f'ffmpeg -y -i "{video}" -vf "{vf}" -c:v libx264 -preset {PRESET} '
+               f'-b:v {video_kbps}k -maxrate {vmax}k -bufsize {vbuf}k '
+               f'-c:a aac -b:a {audio_kbps}k -ar 44100 "{out_path}"')
+        print(f"[finalize] 单 pass 目标 ~{target_mb}MB / {dur:.0f}s，视频码率 ~{video_kbps}kbps")
+    else:
+        print("WARN 无法探测时长，单 pass CRF23 编码")
+        cmd = (f'ffmpeg -y -i "{video}" -vf "{vf}" -c:v libx264 -preset {PRESET} '
+               f'-crf 23 -c:a aac -b:a {audio_kbps}k -ar 44100 "{out_path}"')
+    r = os.system(cmd)
+    return r == 0 and os.path.exists(out_path)
 
 
 def main():
@@ -148,7 +140,7 @@ def main():
     full_mb = os.path.getsize(os.path.join(WORK, "output.mp4")) / 1048576
     print(f"[finalize] DONE 完整版 output.mp4 {full_mb:.1f}MB")
 
-    # 1080p 手机精简版（保持 1080p，2-pass 压到 ~300MB，移动端/网盘快速下载）
+    # 1080p 手机精简版（保持 1080p，单 pass ABR 压到 ~300MB，移动端/网盘快速下载）
     print("[finalize] ffmpeg 烧录（1080p 精简版，目标 ~300MB）...")
     ok2 = burn_target(video, srt_abs, os.path.join(WORK, "output_1080p.mp4"),
                       target_mb=300, fontsize=15, audio_kbps=128)

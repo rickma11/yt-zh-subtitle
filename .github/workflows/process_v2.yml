@@ -22,7 +22,7 @@ concurrency:
 jobs:
   process:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 360
     env:
       SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
       PAN123_CLIENT_ID: ${{ secrets.PAN123_CLIENT_ID }}
