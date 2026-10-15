@@ -13,6 +13,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -150,8 +151,7 @@ def resolve_channel_id(handle, cache):
     return m.group(1)
 
 
-def fetch_rss(channel_id):
-    xml = http_get(f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}")
+def _parse_rss(xml):
     root = ET.fromstring(xml)
     entries = []
     for e in root.findall("a:entry", NS):
@@ -173,6 +173,39 @@ def fetch_rss(channel_id):
                 "channel": author,
             })
     return entries
+
+
+def fetch_rss(channel_id, retries=3):
+    """拉频道 RSS，返回带精确 published(UTC) 的 entries。
+
+    端点优先级（针对 @AuzioMF 这类 channel_id RSS 间歇 404 的频道做加固）：
+      1) playlist_id=UU... 形式的“上传”播放列表 RSS（通常比 channel_id 端点稳定）
+      2) channel_id=UC...（原端点）
+      3) rss.youtube.com 域名的上述两种（部分网络/runner 对该域名更友好）
+    全部候选都试一遍，整体重试 retries 次，以应对 YouTube 临时限流/间歇 404。
+    只要任一端点返回非空 entries 即采用——RSS 是唯一带可靠发布时间的源，
+    命中后“今天自然日”过滤才成立。
+    """
+    pl_id = "UU" + channel_id[2:]
+    candidates = [
+        f"https://www.youtube.com/feeds/videos.xml?playlist_id={pl_id}",
+        f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}",
+        f"https://rss.youtube.com/feeds/videos.xml?channel_id={channel_id}",
+        f"https://rss.youtube.com/feeds/videos.xml?playlist_id={pl_id}",
+    ]
+    last_err = None
+    for _ in range(retries):
+        for url in candidates:
+            try:
+                xml = http_get(url)
+                entries = _parse_rss(xml)
+                if entries:
+                    return entries
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+                continue
+        time.sleep(2)
+    raise last_err or RuntimeError("RSS 拉取失败")
 
 
 def _unescape_json_str(s):
