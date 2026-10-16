@@ -316,7 +316,9 @@ jobs:
             -d "desp=${TITLE_LINE}${LINKS}" || true
 
       - name: 标记已处理并提交 state.json
-        if: steps.resolve.outputs.vid != ''
+        # 仅当发布真正成功(Step4 release outcome=success)才写维护表，
+        # 避免 Step3.8 校验门失败/发布失败时仍写入 video_log 导致该视频永远被去重、漏抓
+        if: steps.release.outcome == 'success'
         env:
           VID: ${{ steps.resolve.outputs.vid }}
         run: |
@@ -356,8 +358,12 @@ jobs:
             echo "state 无变化，跳过提交"
           else
             git commit -m "state+video_log: processed $VID"
+            # 直接推到 main（维护表仅 bot 写；每个 run 基于最新 main checkout，通常 fast-forward）。
+            # 旧写法 git pull --rebase 在 Actions 默认 detached HEAD 下必失败 → 永远推不上云 →
+            # 维护表从未持久化（这就是 video_log.json 一直是空 {} 的根因）。
             for i in 1 2 3; do
-              git pull --rebase -q && git push -q && break
+              git push origin HEAD:refs/heads/main -q && break
               echo "push 重试 $i"; sleep 3
+              git fetch origin main -q 2>/dev/null || true
             done
           fi
