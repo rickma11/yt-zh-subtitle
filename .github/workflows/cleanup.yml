@@ -5,6 +5,7 @@ on:
     # 每天 UTC 20:00 = 北京时间 04:00 运行。
     # 清理任务对时效不敏感（延迟几小时无影响），故直接用 GitHub 自带 schedule，
     # 不占用外部 cron-job.org 配额（process_v2 已迁至 cron-job.org 触发）。
+    - cron: '0 20 * * *'
   workflow_dispatch:
     inputs:
       days:
