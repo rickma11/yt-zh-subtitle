@@ -158,6 +158,33 @@ jobs:
           fi
           echo "url=$COVER_URL" >> "$GITHUB_OUTPUT"
 
+      - name: Step3.8 中文占比校验门（防止静默出英文片）
+        if: steps.resolve.outputs.vid != ''
+        run: |
+          python - <<'PY'
+          import re, sys
+          p = "work/zh.srt"
+          try:
+              txt = open(p, encoding="utf-8", errors="ignore").read()
+          except FileNotFoundError:
+              print("FATAL 无 zh.srt"); sys.exit(1)
+          HAN = re.compile(r'[\u4e00-\u9fff]')
+          LAT = re.compile(r'[A-Za-z]')
+          # 仅统计字幕正文行（排除序号行与 --> 时间轴行）
+          lines = [l.strip() for l in txt.splitlines()
+                   if l.strip() and '-->' not in l and not l.strip().isdigit()]
+          if not lines:
+              print("FATAL zh.srt 为空"); sys.exit(1)
+          eng = sum(1 for l in lines if LAT.search(l) and not HAN.search(l))
+          ratio = eng / len(lines)
+          print(f"字幕 {len(lines)} 行，仍英文 {eng} 行（占比 {ratio:.0%}）")
+          if ratio >= 0.6:
+              print(f"FATAL 中文占比不足（英文占比 {ratio:.0%} >= 60%），"
+                    f"job 失败以便下次 cron 重跑，不静默出英文片")
+              sys.exit(1)
+          print("中文校验通过")
+          PY
+
       - name: Step4 发布 Release（完整版 + 1080p精简版 + 字幕 + 封面）
         id: release
         if: steps.resolve.outputs.vid != ''
@@ -263,9 +290,9 @@ jobs:
           ZH_TITLE=$(python - <<'PY'
           import json
           try:
-              from translate import translate_many
+              from translate import translate
               t = json.load(open('work/notube_meta.json')).get('title', '')
-              print(translate_many([t])[0] if t else '')
+              print(translate(t) if t else '')
           except Exception:
               print('')
           PY
