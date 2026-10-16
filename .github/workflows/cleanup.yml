@@ -1,0 +1,37 @@
+name: Cleanup Old Releases
+
+on:
+  schedule:
+    # 每天 UTC 20:00 = 北京时间 04:00 运行。
+    # 清理任务对时效不敏感（延迟几小时无影响），故直接用 GitHub 自带 schedule，
+    # 不占用外部 cron-job.org 配额（process_v2 已迁至 cron-job.org 触发）。
+  workflow_dispatch:
+    inputs:
+      days:
+        description: '清理早于 N 天的 release（默认 3）'
+        required: false
+        default: '3'
+      dry_run:
+        description: 'dry-run：true 只列计划不真删'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write   # 删除 release + git tag 需要
+
+concurrency:
+  group: yt-zh-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 清理 3 天前的旧 Release（含 git tag）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DAYS: ${{ inputs.days || '3' }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        run: python scripts/cleanup_releases.py
