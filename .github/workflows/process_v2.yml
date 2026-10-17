@@ -297,8 +297,10 @@ jobs:
               print('')
           PY
           )
-          # 翻译失败会退回原文（与 TITLE 相同），此时不重复展示中文行
-          if [ "$ZH_TITLE" = "$TITLE" ]; then ZH_TITLE=""; fi
+          # 中文标题与英文原标题一样始终展示（用户要求：通知必须同时含英文原标题 + 中文翻译）。
+          # 三端全挂时 translate() 会退回原文；原文无可译内容（如 "100%"）时译文与原文相同；
+          # 两种情况都照实展示，不静默缺行。极端情况（python 块整体异常）用 TITLE 兜底。
+          if [ -z "$ZH_TITLE" ] && [ -n "$TITLE" ]; then ZH_TITLE="$TITLE"; fi
           LINKS=""
           if [ -n "$COVER_URL" ]; then
             LINKS="${LINKS}%0A🖼️ 封面图: ${COVER_URL}"
