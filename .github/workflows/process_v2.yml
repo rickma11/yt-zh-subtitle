@@ -124,6 +124,31 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: Step3.0 翻译标题（英文→中文，通知/Release 用）
+        id: title_zh
+        # 放在字幕翻译之前：此时 Google 配额全新，标题翻译成功率最高
+        # （放在 Step4d 时字幕阶段已消耗几百次请求，Google 常进入 429 限流窗口）
+        if: steps.resolve.outputs.vid != ''
+        run: |
+          ZH=$(python - <<'PY'
+          import json
+          from translate import translate
+          try:
+              t = json.load(open('work/notube_meta.json')).get('title', '')
+          except Exception:
+              t = ''
+          # translate() 日志走 stderr，此处 stdout 只有纯译文；再净化换行防格式乱
+          print((translate(t) if t else '').replace('\r', ' ').replace('\n', ' ').strip())
+          PY
+          )
+          if [ -z "$ZH" ]; then
+            # 多轮重试仍失败：回落英文原文，保证通知两行标题齐全
+            T=$(python -c "import json;print(json.load(open('work/notube_meta.json')).get('title','video'))" 2>/dev/null || echo video)
+            ZH="$T"
+          fi
+          echo "zh_title=$ZH" >> "$GITHUB_OUTPUT"
+          echo "标题中文: $ZH"
+
       - name: Step3 翻译润色 + 烧录（完整版 + 1080p 精简版）
         if: steps.resolve.outputs.vid != ''
         env:
@@ -286,36 +311,24 @@ jobs:
           PAN123_URL: ${{ steps.pan123.outputs.url }}
           VIDEO_ID: ${{ steps.resolve.outputs.vid }}
           COVER_URL: ${{ steps.cover.outputs.url }}
+          ZH_TITLE: ${{ steps.title_zh.outputs.zh_title }}
         run: |
           if [ -z "$SERVERCHAN_KEY" ]; then echo "no SERVERCHAN_KEY, skip"; exit 0; fi
           TITLE=$(python -c "import json;print(json.load(open('work/notube_meta.json')).get('title','video'))" 2>/dev/null || echo "video")
-          # 视频标题中文翻译（原文英文 + 中文，便于一眼分辨内容）
-          ZH_TITLE=$(python - <<'PY'
-          import json
-          try:
-              from translate import translate
-              t = json.load(open('work/notube_meta.json')).get('title', '')
-              print(translate(t) if t else '')
-          except Exception:
-              print('')
-          PY
-          )
-          # 中文标题与英文原标题一样始终展示（用户要求：通知必须同时含英文原标题 + 中文翻译）。
-          # 三端全挂时 translate() 会退回原文；原文无可译内容（如 "100%"）时译文与原文相同；
-          # 两种情况都照实展示，不静默缺行。极端情况（python 块整体异常）用 TITLE 兜底。
-          if [ -z "$ZH_TITLE" ] && [ -n "$TITLE" ]; then ZH_TITLE="$TITLE"; fi
+          # 中文标题来自 Step3.0 预译（多轮重试+净化）；异常时兜底用原文，保证两行标题齐全
+          ZH_TITLE=$(printf '%s' "$ZH_TITLE" | tr '\n\r' '  ' | sed 's/^ *//;s/ *$//')
+          if [ -z "$ZH_TITLE" ]; then ZH_TITLE="$TITLE"; fi
+          # 每条内容独立成行：Server酱 markdown 下单 \n 渲染为空格不换行，用空行(%0A%0A)分段
           LINKS=""
           if [ -n "$COVER_URL" ]; then
-            LINKS="${LINKS}%0A🖼️ 封面图: ${COVER_URL}"
-            LINKS="${LINKS}%0A![封面](${COVER_URL})"
+            LINKS="${LINKS}%0A%0A🖼️ 封面图: ${COVER_URL}"
           fi
-          if [ -n "$PIXEL_URL" ]; then LINKS="${LINKS}%0A📦 免费网盘直链(需VPN/代理, 点开直接下载): ${PIXEL_URL}"; fi
-          if [ -n "$PAN123_URL" ]; then LINKS="${LINKS}%0A📦 国内网盘(123云盘): ${PAN123_URL}"; fi
-          LINKS="${LINKS}%0A📦 GitHub Release(完整版+1080p精简版+封面): ${RELEASE_URL}"
-          LINKS="${LINKS}%0A📄 字幕 zh.srt 见上述 Release 资产"
-          # 标题行：原文英文 + 中文翻译（用户要求）
-          TITLE_LINE="🎬 标题（原文）: ${TITLE}"
-          if [ -n "$ZH_TITLE" ]; then TITLE_LINE="${TITLE_LINE}%0A🎬 标题（中文）: ${ZH_TITLE}"; fi
+          if [ -n "$PIXEL_URL" ]; then LINKS="${LINKS}%0A%0A📦 免费网盘直链(需VPN/代理, 点开直接下载): ${PIXEL_URL}"; fi
+          if [ -n "$PAN123_URL" ]; then LINKS="${LINKS}%0A%0A📦 国内网盘(123云盘): ${PAN123_URL}"; fi
+          LINKS="${LINKS}%0A%0A📦 GitHub Release(完整版+1080p精简版+封面): ${RELEASE_URL}"
+          LINKS="${LINKS}%0A%0A📄 字幕 zh.srt 见上述 Release 资产"
+          # 标题两行：原文英文 + 中文翻译（Step3.0 预译，见该步骤日志）
+          TITLE_LINE="🎬 标题（原文）: ${TITLE}%0A%0A🎬 标题（中文）: ${ZH_TITLE}"
           curl -s "https://sctapi.ftqq.com/${SERVERCHAN_KEY}.send" \
             -d "title=新视频处理完成（已烧录中文字幕）" \
             -d "desp=${TITLE_LINE}${LINKS}" || true
