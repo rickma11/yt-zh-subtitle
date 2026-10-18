@@ -14,6 +14,38 @@ const MAX_TRIES = 5;
 
 function log(...a) { console.log('[video]', ...a); }
 
+// 标题优先走 YouTube oEmbed API：纯 HTTP、返回稳定 JSON，不依赖 notube 页面结构。
+// 背景：notube 改版后转换页 .page-title h1 刮到的是「100%」等非标题元素，故不再依赖刮取。
+async function fetchOembedTitle(vid) {
+  const url = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${vid}&format=json`;
+  for (let i = 0; i < 2; i++) {
+    try {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 15000);
+      const resp = await fetch(url, { signal: ac.signal, headers: { 'User-Agent': 'Mozilla/5.0' } });
+      clearTimeout(timer);
+      if (resp.ok) {
+        const d = await resp.json();
+        if (d && d.title && d.title.trim()) return d.title.trim();
+      }
+      log(`oEmbed 第${i + 1}次非 200:`, resp.status);
+    } catch (e) {
+      log(`oEmbed 第${i + 1}次失败:`, e.message);
+    }
+    await new Promise(r => setTimeout(r, 3000));
+  }
+  return null;
+}
+
+// 统一标题解析：oEmbed -> 页面刮取兜底 -> 视频 ID（绝不返回空）
+async function resolveTitle(vid, scraped) {
+  const t = await fetchOembedTitle(vid);
+  if (t) { log('标题(oEmbed):', t.slice(0, 80)); return t; }
+  if (scraped && scraped.trim()) { log('标题(页面刮取兜底):', scraped.trim().slice(0, 80)); return scraped.trim(); }
+  log('oEmbed 与刮取均失败，标题兜底为视频 ID');
+  return vid;
+}
+
 async function tryOnce(page, fmt) {
   log('打开 notube.net/en');
   await page.goto('https://notube.net/en', { waitUntil: 'domcontentloaded', timeout: 45000 });
@@ -123,8 +155,9 @@ async function main() {
 
   try {
     if (ok) {
+      const finalTitle = await resolveTitle(VID, title);
       writeFileSync(`${OUTDIR}/notube_meta.json`, JSON.stringify({
-        vid: VID, title, url: page.url(), dlUrl, size,
+        vid: VID, title: finalTitle, url: page.url(), dlUrl, size,
       }, null, 1));
       log('DONE');
     } else {
@@ -140,7 +173,8 @@ async function main() {
       if (existsSync(`${OUTDIR}/video.mp4`) && statSync(`${OUTDIR}/video.mp4`).size > 1024 * 1024) {
         const s = statSync(`${OUTDIR}/video.mp4`).size;
         log('curl 兜底成功:', (s / 1048576).toFixed(1) + 'MB');
-        writeFileSync(`${OUTDIR}/notube_meta.json`, JSON.stringify({ vid: VID, dlUrl, size: s }, null, 1));
+        const finalTitle = await resolveTitle(VID, null);
+        writeFileSync(`${OUTDIR}/notube_meta.json`, JSON.stringify({ vid: VID, title: finalTitle, dlUrl, size: s }, null, 1));
         ok = true;
       }
     }
