@@ -194,7 +194,10 @@ jobs:
           import json,re
           try: t=json.load(open('work/notube_meta.json')).get('title','video')
           except: t='video'
-          t=re.sub(r'[\/\\:"*?<>|]','',t); t=re.sub(r'\s+','_',t)
+          # 白名单清洗：仅保留 中英日韩文字/字母/数字/下划线 + 少量标题常用符号(+ - ! & . , ' ( ) [ ])，
+          # 其余(emoji如🔥🤯、箭头、变体选择符等非常规字符)一律剔除，避免文件名/路径出问题
+          t=re.sub(r"[^\w\s+\-!&.,'()\[\]%]",'',t)
+          t=re.sub(r'\s+','_',t)
           print(t[:60])
           PY
           )
