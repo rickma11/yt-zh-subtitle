@@ -1,4 +1,4 @@
-name: Process Video v2 (notube + downsub + 烧录 + Release)
+name: Process Video v2 (notube + whisper + 烧录 + Release)
 
 on:
   # 定时触发已迁移到外部 cron-job.org（GitHub 自带 schedule 会延迟，实测拖到 07:12）。
@@ -94,22 +94,12 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: Step2a 获取字幕 (DownSub API 首选)
-        id: downsub
+      - name: Step2 获取字幕 (Whisper 本地转写, medium + EAFC 术语提示词)
         if: steps.resolve.outputs.vid != ''
-        continue-on-error: true
         env:
           VID: ${{ steps.resolve.outputs.vid }}
           OUTDIR: work
-          DOWNSUB_API_KEY: ${{ secrets.DOWNSUB_API_KEY }}
-        run: python scripts/downsub_api.py
-
-      - name: Step2b 获取字幕 (Whisper 兜底)
-        if: steps.resolve.outputs.vid != '' && steps.downsub.outcome != 'success'
-        env:
-          VID: ${{ steps.resolve.outputs.vid }}
-          OUTDIR: work
-          WHISPER_MODEL: small
+          WHISPER_MODEL: medium
         run: python scripts/whisper_subs.py
 
       - name: 上传字幕产物 (调试/留存)
@@ -245,7 +235,7 @@ jobs:
             # 无 || true：真实失败（如文件缺失/权限）必须让 run 报错可见
             gh release create "$TAG" "$NAME_FULL" "$NAME_COMPACT" work/zh.srt $COVER_ARG \
               --title "$TITLE" \
-              --notes "自动处理：notube 下载 + DownSub/Whisper 字幕 + Google 翻译硬烧录（含完整版、1080p精简版与封面）"
+              --notes "自动处理：notube 下载 + Whisper(medium) 本地转写 + EAFC 术语翻译硬烧录（含完整版、1080p精简版与封面）"
           fi
           echo "name_full=$NAME_FULL" >> "$GITHUB_OUTPUT"
           echo "name_compact=$NAME_COMPACT" >> "$GITHUB_OUTPUT"
