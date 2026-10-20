@@ -11,10 +11,13 @@
     "8WfN05DYgMs": "done",
     "O9PUBcXUD8U": "done",
     "Vq2zZ-Vyncs": "done",
-    "yiWZYLd8XkM": "done"
+    "yiWZYLd8XkM": "done",
+    "Xhz7hAEdpDU": "done"
   },
   "resolved_ids": {
     "@AuzioMF": "UCXWfmXteFx5KLLBnxV0fq7A"
   },
-  "shorts_checked": {}
+  "shorts_checked": {
+    "Xhz7hAEdpDU": false
+  }
 }
