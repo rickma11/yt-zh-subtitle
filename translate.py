@@ -13,6 +13,9 @@
   直接抛异常让 job 失败，由下次 cron 重跑（额度第二天重置），**绝不静默烧录英文片**。
   仅 1~2 句偶发未译出（如 GOAL! 这类喊声）不触发失败，避免无谓重跑。
 - 标题等单段翻译：多轮重试（默认 5 轮，递增间隔），跨过 Google 429 短窗口。
+- FC27 术语层（polish.py + fc_terms.json，数据源 OAO-evotrans 官方术语库）：
+  译前把英文术语（六维/比赛风格/球员角色/化学卡/战术口语 273 条 + 位置缩写 13 条）
+  预替换为「欧啊欧」标准译名，译后按 55 条校正表把机翻错译改成圈内习惯说法。
 
 重要：所有日志一律走 stderr，stdout 只输出纯结果，
 避免 workflow 中 `$(python ...)` 捕获时把日志混进通知内容。
@@ -124,18 +127,22 @@ def translate(text, sl="auto", tl="zh-CN", rounds=5):
 
     多轮重试原因：标题翻译常发生在字幕翻译之后（Google 配额被消耗、限流窗口期），
     递增间隔（3/6/9/12s）可跨过 Google 429 的短时限流窗口。
+
+    译前走 polish.preprocess（FC 术语预替换为 OAO 标准译名），
+    译后走 polish.polish（圈内习惯校正），全失败返回的也是预替换后的文本。
     """
     if not text or not text.strip():
         return text
+    text = polish.preprocess(text)
     for i in range(rounds):
         try:
-            return _translate_one_chain(text, sl, tl)
+            return polish.polish(_translate_one_chain(text, sl, tl))
         except Exception as e:  # noqa: BLE001
             _log(f"    [translate] 标题翻译第 {i + 1}/{rounds} 轮失败: {e}")
             if i < rounds - 1:
                 time.sleep(3 * (i + 1))
     _log(f"    [translate] 标题翻译 {rounds} 轮全失败，保留原文")
-    return text
+    return polish.polish(text)
 
 
 def translate_many(texts, sl="auto", tl="zh-CN", pace=1.0, log_every=25,
@@ -145,11 +152,13 @@ def translate_many(texts, sl="auto", tl="zh-CN", pace=1.0, log_every=25,
     - 主 Google，连续失败整体切 MyMemory；首轮未译出的段进入「二刷」用全链路重试。
     - gate=True 时：若「仍为英文」的段占比 >= fail_ratio 且数量 >= min_fail_lines，
       抛 RuntimeError 让 job 失败以便下次重跑（不静默出英文片）。
-    - 返回与输入等长的已润色中文字幕列表。
+    - 返回与输入等长的已润色中文字幕列表（译前术语预替换 + 译后圈内习惯校正）。
     """
     total = len(texts)
     if total == 0:
         return []
+    # 译前统一预替换 FC 术语（六维/比赛风格/角色/化学/战术口语 -> OAO 标准译名）
+    texts = [polish.preprocess(t) for t in texts]
     out = []
     failed_idx = []
     google_dead = False
@@ -214,6 +223,10 @@ def translate_many(texts, sl="auto", tl="zh-CN", pace=1.0, log_every=25,
 if __name__ == "__main__":
     # 简易自检：用模拟端点验证校验门逻辑（不联网）
     sample = ["Hello world", "This is a test", "GOAL!", "2 - 1", "Thank you"]
+    _orig_google, _orig_mm, _orig_chain = _google_translate, _mymemory_translate, _CHAIN
+    _google_translate = lambda *a, **k: "Hola mundo"  # 模拟：译成非中文（西班牙语）
+    _mymemory_translate = lambda *a, **k: "Bonjour"    # 模拟：译成非中文（法语）
+    _CHAIN = (("mock_es", _google_translate), ("mock_fr", _mymemory_translate))
     # 模拟「全部英文」应触发 gate
     print("self-check: 译文仍英文时 gate 应抛异常")
     try:
@@ -222,3 +235,6 @@ if __name__ == "__main__":
         sys.exit(1)
     except RuntimeError as e:
         print(f"  -> 正确抛异常: {e}")
+    finally:
+        _google_translate, _mymemory_translate, _CHAIN = _orig_google, _orig_mm, _orig_chain
+    print("self-check: PASS")
