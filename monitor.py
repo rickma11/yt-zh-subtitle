@@ -4,7 +4,8 @@
 
 - 解析 @handle -> channel_id（抓频道页的 browseId/externalId/channelId 字段）
 - 拉 RSS（feeds/videos.xml，无需 API key）；RSS 失败时回退 /channel/<id>/videos 标签页
-- 与维护表 video_log.json 比对，只挑“频道最新一条非 Short 且不在维护表中”的视频
+- 与维护表 video_log.json 比对，遍历 entries 挑出“第一条未处理(不在维护表)且发布在
+  MAX_AGE_DAYS 天内”的普通视频（fall-through：若最新一条已在表中会往下找，不再整轮跳过）
   → 视为更新 → 输出到 new_videos.json
 - 维护表记录每个已处理视频的 id + 处理日期（北京时间），持续累积，用于去重
   （不依赖被限流的 RSS published 时间）
@@ -18,6 +19,7 @@ import time
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 CONFIG = os.path.join(ROOT, "config.json")
@@ -73,72 +75,83 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         raise urllib.error.HTTPError(newurl, code, msg, headers, fp)
 
 
-def is_short(video_id, cache):
-    """判断 video_id 是否为 YouTube Short。
+# YouTube 现已对所有视频的 /shorts/<id> 返回 200（不再 302 到 /watch），旧“200=Short”判定彻底失效。
+# 改用视频时长判定：Shorts 时长 <= SHORT_MAX_SECONDS（秒）。从 /shorts/<id> 页面 HTML 的 player
+# config 提取 lengthSeconds（首个匹配即主视频时长）。探测异常/拿不到时长时默认非 Short（不缓存，
+# 下轮重试）——宁可漏过一个 Short，也不误伤正常视频。
+SHORT_MAX_SECONDS = 60
 
-    依据：GET https://www.youtube.com/shorts/<id>
-      - 普通视频 -> 302 重定向到 /watch?v=<id>
-      - Short     -> 直接 200 返回
-    结果写入 cache（state["shorts_checked"]）避免重复探测；
-    探测异常（429/5xx/超时）时返回 False（保留该视频、不缓存，下轮重试）——
-    宁可漏过一个 Short，也不误伤正常视频。
-    """
+
+def is_short(video_id, cache):
+    """判断 video_id 是否为 YouTube Short（基于视频时长）。"""
     if video_id in cache:
         return cache[video_id]
     url = f"https://www.youtube.com/shorts/{video_id}"
     try:
-        opener = urllib.request.build_opener(_NoRedirect(), urllib.request.ProxyHandler({}))
-        with opener.open(urllib.request.Request(url, headers=UA), timeout=20) as r:
-            result = True  # 直接 200 -> Short
-    except urllib.error.HTTPError as e:
-        loc = e.headers.get("Location", "")
-        if 300 <= e.code < 400 and "watch?v=" in loc:
-            result = False
-        elif e.code == 404:
-            result = False
-        else:
-            print(f"[monitor] Short 探测异常 {video_id}: HTTP {e.code}"
-                  f"（默认按非 Short 处理，不缓存，下轮重试）")
+        req = urllib.request.Request(url, headers=UA)
+        with urllib.request.urlopen(req, timeout=20) as r:
+            html = r.read().decode("utf-8", "ignore")
+        m = re.search(r'"lengthSeconds"\s*:\s*"?(\d+)', html)
+        if not m:
+            print(f"[monitor] {video_id}: 未取得时长，默认按非 Short 处理（不缓存）")
             return False
+        dur = int(m.group(1))
+        result = dur <= SHORT_MAX_SECONDS
+        print(f"[monitor] {video_id}: 时长 {dur}s -> {'Short' if result else '普通'}")
     except Exception as e:  # noqa: BLE001
-        print(f"[monitor] Short 探测异常 {video_id}: {e}"
-              f"（默认按非 Short 处理，不缓存，下轮重试）")
+        print(f"[monitor] Short 探测异常 {video_id}: {e}（默认按非 Short 处理，不缓存，下轮重试）")
         return False
     cache[video_id] = result
     return result
 
 
-# 注：原“今天自然日(北京时间)”发布时间过滤已弃用——@AuzioMF 的 RSS 常被限流返回 404，
-# 而 /watch 取 uploadDate 又被 GitHub runner 的 IP 反爬挡掉，拿不到可靠时间。
-# 现改用 video_log.json 维护表做“频道最新视频是否首次出现”的去重（见 select_update / main），
-# 完全不依赖 published。
+# 注：原“今天自然日(北京时间)”硬过滤曾因 RSS published 不可靠(被限流 404 / runner IP 反爬)
+# 而弃用。现 RSS 已能稳定返回带时区的 published（实测正常），故在 select_update 内恢复一层
+# “MAX_AGE_DAYS 天内”的年龄护栏作为安全网（专治频道把 2019 置顶老视频排 RSS 第一的异常），
+# 同时保留 video_log.json 维护表做“首次出现”去重——两者互补，不完全依赖 published。
 
 
-def select_update(entries, vlog, shorts_checked, handle):
-    """从 entries（最新在前）里挑出‘最新一条非 Short 且不在维护表’的视频。
+def _parse_rfc3339(s):
+    """解析 RSS 的 published(如 2026-10-19T19:00:45+00:00) 为 aware datetime；失败返回 None。"""
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except Exception:  # noqa: BLE001
+        return None
 
-    返回该 entry；若没有符合条件的视频（全是 Short / 最新一条已在表中）返回 None。
-    这正是用户要的判定：最新一条既不是维护表里最新的那条、也不是表里其他的 → 即更新。
+
+def select_update(entries, vlog, shorts_checked, handle, max_age_days=7):
+    """从 entries（最新在前）里挑出第一条『未处理且发布在 N 天内』的普通视频。
+
+    相比旧实现的两处关键修复：
+    1. 遍历全部 entries（而非只看第一条）——若最新一条已在维护表（例如被 YouTube 置顶到
+       RSS 首位的 2019 老视频），会 fall-through 继续往下找，直到命中第一条未处理的新片，
+       不会再因“最新一条在表里”而整轮 return None、永远够不到下面的真新片。
+    2. 年龄护栏：published 距今天(UTC)超过 max_age_days 的直接跳过，专治 RSS 把陈年置顶
+       视频排第一的异常，避免把 2019 老片当新片处理。RSS 现能稳定返回可靠 published。
+    /videos 兜底无 published 时退化为“只跳过已在表的”，不拦（保持兼容）。
     """
-    newest_regular = None
+    now = datetime.now(timezone.utc)
     for e in entries:
         vid = e["video_id"]
+        if vid in vlog:
+            print(f"[monitor] {handle}: 跳过已处理 {vid} | {e['title'][:50]}")
+            continue
         if is_short(vid, shorts_checked):
             print(f"[monitor] {handle}: 跳过 Short {vid} | {e['title'][:50]}")
             continue
-        newest_regular = e  # entries 已按最新在前排序，第一条非 Short 即最新普通视频
-        break
-    if newest_regular is None:
-        print(f"[monitor] {handle}: 未发现非 Short 视频，结束")
-        return None
-    vid = newest_regular["video_id"]
-    if vid in vlog:
-        rec = vlog[vid]
-        d = rec.get("date") if isinstance(rec, dict) else rec
-        print(f"[monitor] {handle}: 最新视频 {vid} 已在维护表中({d})，非更新，跳过")
-        return None
-    print(f"[monitor] {handle}: 检测到更新(最新未处理) {vid} | {newest_regular['title'][:60]}")
-    return newest_regular
+        pub = e.get("published", "")
+        dt = _parse_rfc3339(pub) if pub else None
+        if dt is not None:
+            age = (now - dt).days
+            if age > max_age_days:
+                print(f"[monitor] {handle}: 跳过过旧视频 {vid} (发布 {pub}, {age}天前, 超 {max_age_days}天)")
+                continue
+        print(f"[monitor] {handle}: 检测到更新(最新未处理) {vid} | {e['title'][:60]}")
+        return e
+    print(f"[monitor] {handle}: 无未处理的新视频（均已处理/过旧/Short）")
+    return None
 
 
 def resolve_channel_id(handle, cache):
@@ -290,7 +303,8 @@ def main():
         # 不依赖 RSS 的 published（@AuzioMF 的 RSS 常被限流 404、/watch 取时间又被 runner
         # IP 反爬挡掉），改用“频道最新视频是否首次出现”判定更新，稳定可靠。
         vlog = load_video_log()
-        chosen = select_update(entries, vlog, shorts_checked, handle)
+        max_age = cfg.get("max_age_days", 7)
+        chosen = select_update(entries, vlog, shorts_checked, handle, max_age)
         if chosen is None:
             continue
         new_videos.append({**chosen, "channel_id": cid, "channel_handle": handle})
