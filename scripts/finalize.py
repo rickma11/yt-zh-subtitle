@@ -115,7 +115,7 @@ def main():
         segs = parse_srt(en_path)
         print(f"  共 {len(segs)} 条")
         texts = [html.unescape(s["text"]).replace("\n", " ") for s in segs]
-        done = translate_many(texts, log_every=25)
+        done = translate_many(texts, sl="en", log_every=25)
         polished = [polish(d) for d in done]
         for s, p in zip(segs, polished):
             s["text"] = p
