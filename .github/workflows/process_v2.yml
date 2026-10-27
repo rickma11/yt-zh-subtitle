@@ -27,6 +27,9 @@ jobs:
       SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
       PAN123_CLIENT_ID: ${{ secrets.PAN123_CLIENT_ID }}
       PAN123_CLIENT_SECRET: ${{ secrets.PAN123_CLIENT_SECRET }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
     steps:
       - uses: actions/checkout@v4
 
