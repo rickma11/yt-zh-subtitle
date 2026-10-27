@@ -23,6 +23,7 @@
 若将来配置 LLM key（如 DEEPSEEK_API_KEY），可在此链首部插入 LLM 端点，做到真正 100% 保证。
 """
 import json
+import os
 import random
 import re
 import sys
@@ -37,6 +38,14 @@ ENDPOINT = "https://translate.googleapis.com/translate_a/single"
 MYMEMORY = "https://api.mymemory.translated.net/get"
 # MyMemory 免费额度：匿名 5000 字符/天；带 email 参数提升到 50000 字符/天（官方规则，邮箱无需归属验证）
 MYMEMORY_EMAIL = "ytzhbot@users.noreply.github.com"
+
+# LLM 端点配置（OpenAI 兼容，通过环境变量配置）
+# LLM_API_KEY: API 密钥（GitHub secrets 配置）
+# LLM_BASE_URL: API 基础地址（默认 DeepSeek）
+# LLM_MODEL: 模型名（默认 deepseek-chat）
+LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.deepseek.com/v1")
+LLM_MODEL = os.environ.get("LLM_MODEL", "deepseek-chat")
 
 # CJK 判定：含汉字视为已译出中文；含拉丁字母但无汉字视为「仍为英文」
 _HAN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
@@ -102,9 +111,65 @@ def _mymemory_translate(text, sl="auto", tl="zh-CN"):
     return tr
 
 
+def _llm_translate(text, sl="auto", tl="zh-CN", retries=2):
+    """LLM 翻译（OpenAI 兼容端点，通过环境变量配置）。
+
+    无 API key 时抛异常，由上层跳过（优雅降级到 Google/MyMemory）。
+    翻译链首位：LLM 质量最好，词序自然，球员名保留英文。
+    """
+    if not LLM_API_KEY:
+        raise RuntimeError("LLM_API_KEY 未配置，跳过 LLM 端点")
+    if not text or not text.strip():
+        return text
+    # 构造 OpenAI 兼容的 chat completions 请求
+    url = f"{LLM_BASE_URL}/chat/completions"
+    system_prompt = (
+        "你是一个专业的 FC27/EAFC 足球游戏视频字幕翻译器。"
+        "将英文字幕翻译成中文，要求：\n"
+        "1. 贴合国内 FC/FUT 玩家习惯，术语用游戏圈标准叫法。\n"
+        "2. 球员名、球队名保留英文原名（如 Saka、Stam、Chong 不译）。\n"
+        "3. 口语化，符合主播吐槽开包的语气，不要书面生硬。\n"
+        "4. 只输出译文，不加任何解释或标注。"
+    )
+    body = json.dumps({
+        "model": LLM_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": text},
+        ],
+        "temperature": 0.3,
+        "stream": False,
+    }).encode("utf-8")
+    headers = {
+        "Authorization": f"Bearer {LLM_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    last = None
+    for i in range(retries):
+        try:
+            req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=30) as r:
+                data = json.loads(r.read().decode("utf-8"))
+            return data["choices"][0]["message"]["content"].strip()
+        except urllib.error.HTTPError as e:
+            last = e
+            if e.code in (429, 500, 502, 503, 504):
+                sleep = min(10, (2 ** i)) + random.uniform(0, 1)
+                _log(f"    [translate] LLM {e.code} 限流/错误，退避 {sleep:.1f}s ({i+1}/{retries})")
+                time.sleep(sleep)
+            else:
+                time.sleep(1.5 * (i + 1))
+        except Exception as e:  # noqa: BLE001
+            last = e
+            time.sleep(1.5 * (i + 1))
+    raise RuntimeError(f"LLM failed after {retries} tries: {last}")
+
+
 # 全链路兜底顺序（标题等「尽力而为」场景用）
-_CHAIN = (("google", _google_translate),
-          ("mymemory", _mymemory_translate))
+# LLM 质量最好但需 key；无 key 时抛异常自动跳过，降级到 Google/MyMemory
+_CHAIN = [("llm", _llm_translate),
+          ("google", _google_translate),
+          ("mymemory", _mymemory_translate)]
 
 
 def _translate_one_chain(text, sl, tl):
@@ -164,10 +229,17 @@ def translate_many(texts, sl="auto", tl="zh-CN", pace=1.0, log_every=25,
     google_dead = False
     consec = 0
 
-    # ---- 首轮：Google 主用，失败降级 MyMemory ----
+    # ---- 首轮：LLM 主用（有 key 时），失败降级 Google→MyMemory ----
     for i, t in enumerate(texts, 1):
         res = None
-        if not google_dead:
+        # LLM 优先（质量最好）
+        if LLM_API_KEY:
+            try:
+                res = _llm_translate(t, sl, tl, retries=2)
+                consec = 0
+            except Exception as e:  # noqa: BLE001
+                _log(f"    [translate] LLM 失败，降级 Google: {e}")
+        if res is None and not google_dead:
             try:
                 res = _google_translate(t, sl, tl, retries=2)
                 consec = 0
