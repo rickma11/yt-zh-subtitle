@@ -36,11 +36,18 @@ except Exception:  # noqa: BLE001  术语文件缺失不应拖垮主翻译链
     PRE_TERMS, PRE_TERMS_CS, POST_TERMS, _SKIP = {}, {}, {}, []
 
 # 预编译译前匹配式：词边界 + 大小写不敏感（数字/字母不粘连，防 pacemaker 误伤）
-_PRE_COMPILED = [(re.compile(r"(?<![A-Za-z])" + re.escape(en) + r"(?![A-Za-z])", re.IGNORECASE),
-                  zh, en) for en, zh in PRE_TERMS.items()]
+# 按英文词长度降序排序，保证 "pack weight" 先于 "pack"、"walkout animation" 先于 "walkout" 匹配
+_PRE_COMPILED = sorted(
+    [(re.compile(r"(?<![A-Za-z])" + re.escape(en) + r"(?![A-Za-z])", re.IGNORECASE),
+      zh, en) for en, zh in PRE_TERMS.items()],
+    key=lambda x: len(x[2]), reverse=True
+)
 # 位置缩写：词边界 + 区分大小写
 _PRE_CS_COMPILED = [(re.compile(r"(?<![A-Za-z])" + re.escape(en) + r"(?![A-Za-z])"),
                      zh, en) for en, zh in PRE_TERMS_CS.items()]
+# 译后校正：按 key 长度降序，保证长串（如「这一个L」）先于短串（如「是L」）命中，
+# 避免短规则把长规则要匹配的上下文提前改坏
+_POST_SORTED = sorted(POST_TERMS.items(), key=lambda kv: len(kv[0]), reverse=True)
 
 # 口语化/清理规则（正则）
 RULES = [
@@ -81,7 +88,7 @@ def polish(text):
     """译后处理：机翻错译 -> 圈内习惯说法 + 口语化 + 标点规整。"""
     if not text:
         return text
-    for src, dst in POST_TERMS.items():  # 已按 key 长度降序
+    for src, dst in _POST_SORTED:  # 按 key 长度降序，长串先命中
         if src in text:
             text = text.replace(src, dst)
     for pat, dst in RULES:
