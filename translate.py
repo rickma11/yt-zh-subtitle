@@ -295,10 +295,11 @@ def translate_many(texts, sl="auto", tl="zh-CN", pace=1.0, log_every=25,
 if __name__ == "__main__":
     # 简易自检：用模拟端点验证校验门逻辑（不联网）
     sample = ["Hello world", "This is a test", "GOAL!", "2 - 1", "Thank you"]
-    _orig_google, _orig_mm, _orig_chain = _google_translate, _mymemory_translate, _CHAIN
+    _orig_google, _orig_mm, _orig_llm, _orig_chain = _google_translate, _mymemory_translate, _llm_translate, _CHAIN
+    _llm_translate = lambda *a, **k: "Hola mundo"   # 模拟：译成非中文（西班牙语）
     _google_translate = lambda *a, **k: "Hola mundo"  # 模拟：译成非中文（西班牙语）
     _mymemory_translate = lambda *a, **k: "Bonjour"    # 模拟：译成非中文（法语）
-    _CHAIN = (("mock_es", _google_translate), ("mock_fr", _mymemory_translate))
+    _CHAIN = (("mock_llm", _llm_translate), ("mock_es", _google_translate), ("mock_fr", _mymemory_translate))
     # 模拟「全部英文」应触发 gate
     print("self-check: 译文仍英文时 gate 应抛异常")
     try:
@@ -308,5 +309,5 @@ if __name__ == "__main__":
     except RuntimeError as e:
         print(f"  -> 正确抛异常: {e}")
     finally:
-        _google_translate, _mymemory_translate, _CHAIN = _orig_google, _orig_mm, _orig_chain
+        _google_translate, _mymemory_translate, _llm_translate, _CHAIN = _orig_google, _orig_mm, _orig_llm, _orig_chain
     print("self-check: PASS")
