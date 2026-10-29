@@ -78,7 +78,8 @@ def preprocess(text):
         # 上下文排除：术语命中处若接普通义上下文（如 pace of the game）则跳过
         m = rx.search(text)
         tail = text[m.end():m.end() + 30]
-        if any(k == en and p.search(tail) for k, p in _SKIP):
+        # 键名大小写不敏感比对（skip_context 历史条目大小写不统一）
+        if any(k.lower() == en.lower() and p.search(tail) for k, p in _SKIP):
             continue
         text = rx.sub(lambda _m: zh, text)
     return text
