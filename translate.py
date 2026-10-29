@@ -111,6 +111,28 @@ def _mymemory_translate(text, sl="auto", tl="zh-CN"):
     return tr
 
 
+def _load_llm_prompt():
+    """加载 LLM system prompt（llm_prompt.txt，编码翻译规范 R1-R7）。
+
+    文件缺失时回退到内置精简版，保证 CI 不因少文件而挂。
+    """
+    fallback = (
+        "你是一个专业的 FC27/EAFC 足球游戏视频字幕翻译器。"
+        "将英文字幕翻译成中文，要求：\n"
+        "1. 贴合国内 FC/FUT 玩家习惯，术语用游戏圈标准叫法。\n"
+        "2. 球员名保留英文原名，位置 cam=前腰 cdm=后腰，严禁把 cam 译成摄像头。\n"
+        "3. 卡包规格写 86+×5 / 88+×3；金币换算成万；国籍=球员国籍不是语言。\n"
+        "4. 严禁编造原文没有的内容；口语化；只输出译文。"
+    )
+    try:
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "llm_prompt.txt")
+        with open(p, encoding="utf-8") as f:
+            t = f.read().strip()
+        return t if t else fallback
+    except OSError:
+        return fallback
+
+
 def _llm_translate(text, sl="auto", tl="zh-CN", retries=2):
     """LLM 翻译（OpenAI 兼容端点，通过环境变量配置）。
 
@@ -123,14 +145,7 @@ def _llm_translate(text, sl="auto", tl="zh-CN", retries=2):
         return text
     # 构造 OpenAI 兼容的 chat completions 请求
     url = f"{LLM_BASE_URL}/chat/completions"
-    system_prompt = (
-        "你是一个专业的 FC27/EAFC 足球游戏视频字幕翻译器。"
-        "将英文字幕翻译成中文，要求：\n"
-        "1. 贴合国内 FC/FUT 玩家习惯，术语用游戏圈标准叫法。\n"
-        "2. 球员名、球队名保留英文原名（如 Saka、Stam、Chong 不译）。\n"
-        "3. 口语化，符合主播吐槽开包的语气，不要书面生硬。\n"
-        "4. 只输出译文，不加任何解释或标注。"
-    )
+    system_prompt = _load_llm_prompt()
     body = json.dumps({
         "model": LLM_MODEL,
         "messages": [
