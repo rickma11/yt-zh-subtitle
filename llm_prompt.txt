@@ -27,9 +27,16 @@
 
 【R6 国籍=球员国籍，不是语言】
 - "spanish player"=西班牙球员，"portuguese"=葡萄牙球员；绝不能译成"西班牙语/葡萄牙语"。
+- 国名用标准中文：Turkey=土耳其、South Korea=韩国、Macau=中国澳门、Ivory Coast=科特迪瓦。
 
 【R7 只输出译文】
 - 每段输入只输出对应中文译文，不加序号、注释、拼音、原文或任何解释。
 - 人名/队名按 R1 保留英文时，其余部分正常翻译。
+
+【R8 数据与卡名用国内 FC 圈通用叫法】
+- 六维：pace=速度、shooting=射门、passing=传球、dribbling=盘带、defending=防守、physical=身体；门将细分 diving=飞身扑救、handling=接球、kicking=开球、reflexes=反应、positioning=站位；overall/OVR=总评。
+- 化学卡官方名：Hunter=猎手、Shadow=影子、Engine=发动机、Catalyst=催化剂、Anchor=中流砥柱、Sentinel=哨兵、Glove=手套、Cat=猫、Wall=铜墙铁壁、Basic=基础、Deadeye=神枪手、Marksman=神射手、Finisher=终结者、Sniper=狙击手、Hawk=鹰、Architect=建筑师、Artist=艺术家、Maestro=大师、Backbone=主心骨、Gladiator=角斗士、Guardian=守卫者、Powerhouse=发电站。
+- 联赛：Premier League=英超、LaLiga=西甲、Serie A=意甲、Bundesliga=德甲、Ligue 1=法甲、MLS=美职联、Saudi League=沙特联。
+- 活动与卡质：Ones to Watch=焦点球员、Future Stars=明日之星、Thunderstruck=雷霆万钧、TOTW=周黑、POTM=月最佳、Base Icon=基础传奇、First Owner=先手。
 
 现在开始翻译，逐段执行以上规则。
