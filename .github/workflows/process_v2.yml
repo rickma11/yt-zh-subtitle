@@ -300,6 +300,7 @@ jobs:
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
           RELEASE_URL: ${{ steps.release.outputs.release_url }}
           NAME_COMPACT: ${{ steps.release.outputs.name_compact }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
           PIXEL_URL: ${{ steps.pixeldrain.outputs.url }}
           PAN123_URL: ${{ steps.pan123.outputs.url }}
           VIDEO_ID: ${{ steps.resolve.outputs.vid }}
@@ -311,6 +312,14 @@ jobs:
           # 中文标题来自 Step3.0 预译（多轮重试+净化）；异常时兜底用原文，保证两行标题齐全
           ZH_TITLE=$(printf '%s' "$ZH_TITLE" | tr '\n\r' '  ' | sed 's/^ *//;s/ *$//')
           if [ -z "$ZH_TITLE" ]; then ZH_TITLE="$TITLE"; fi
+          # GitHub Release 内 1080p 精简版「直接下载」直链：点开即下载，无需经过 Release 页面。
+          # 文件名可能含 ! + 等特殊字符，做百分号编码避免 URL 解析异常。
+          if [ -n "$RELEASE_URL" ]; then
+            ENC=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$NAME_COMPACT")
+            DL_1080P="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${ENC}"
+          else
+            DL_1080P=""
+          fi
           # 用真实换行把内容写进文件，再交给 curl --data-urlencode 做正确百分号编码。
           # 关键修复：此前把标题原样拼进 -d "desp=..."，标题里的 & = 等字符会破坏
           # application/x-www-form-urlencoded 字段结构（& 被当成字段分隔符），导致推送被
@@ -337,6 +346,10 @@ jobs:
               echo "📦 GitHub Release(完整版+1080p精简版+封面): ${RELEASE_URL}"
             else
               echo "📦 GitHub Release: ⚠️ 本次生成失败，稍后 cron 自动重试"
+            fi
+            if [ -n "$DL_1080P" ]; then
+              echo ""
+              echo "📥 GitHub 1080p 直链(直接下载, 无需跳页): ${DL_1080P}"
             fi
             echo ""
             echo "📄 字幕 zh.srt 见上述 Release 资产"
