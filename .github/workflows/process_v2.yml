@@ -311,20 +311,40 @@ jobs:
           # 中文标题来自 Step3.0 预译（多轮重试+净化）；异常时兜底用原文，保证两行标题齐全
           ZH_TITLE=$(printf '%s' "$ZH_TITLE" | tr '\n\r' '  ' | sed 's/^ *//;s/ *$//')
           if [ -z "$ZH_TITLE" ]; then ZH_TITLE="$TITLE"; fi
-          # 每条内容独立成行：Server酱 markdown 下单 \n 渲染为空格不换行，用空行(%0A%0A)分段
-          LINKS=""
-          if [ -n "$COVER_URL" ]; then
-            LINKS="${LINKS}%0A%0A🖼️ 封面图: ${COVER_URL}"
-          fi
-          if [ -n "$PIXEL_URL" ]; then LINKS="${LINKS}%0A%0A📦 免费网盘直链(需VPN/代理, 点开直接下载): ${PIXEL_URL}"; fi
-          if [ -n "$PAN123_URL" ]; then LINKS="${LINKS}%0A%0A📦 国内网盘(123云盘): ${PAN123_URL}"; fi
-          LINKS="${LINKS}%0A%0A📦 GitHub Release(完整版+1080p精简版+封面): ${RELEASE_URL}"
-          LINKS="${LINKS}%0A%0A📄 字幕 zh.srt 见上述 Release 资产"
-          # 标题两行：原文英文 + 中文翻译（Step3.0 预译，见该步骤日志）
-          TITLE_LINE="🎬 标题（原文）: ${TITLE}%0A%0A🎬 标题（中文）: ${ZH_TITLE}"
+          # 用真实换行把内容写进文件，再交给 curl --data-urlencode 做正确百分号编码。
+          # 关键修复：此前把标题原样拼进 -d "desp=..."，标题里的 & = 等字符会破坏
+          # application/x-www-form-urlencoded 字段结构（& 被当成字段分隔符），导致推送被
+          # 截断成只剩「标题（原文）」前半段（如 "50x HERO PICKS & PACKS!" 只收到 "50x HERO PICKS "）。
+          # urlencode 后 &→%26、=→%3D、换行→%0A，服务端再解码还原，格式稳定。
+          DESP_FILE="$(mktemp)"
+          {
+            echo "🎬 标题（原文）: ${TITLE}"
+            echo "🎬 标题（中文）: ${ZH_TITLE}"
+            if [ -n "$COVER_URL" ]; then
+              echo ""
+              echo "🖼️ 封面图: ${COVER_URL}"
+            fi
+            if [ -n "$PIXEL_URL" ]; then
+              echo ""
+              echo "📦 免费网盘直链(需VPN/代理, 点开直接下载): ${PIXEL_URL}"
+            fi
+            if [ -n "$PAN123_URL" ]; then
+              echo ""
+              echo "📦 国内网盘(123云盘): ${PAN123_URL}"
+            fi
+            echo ""
+            if [ -n "$RELEASE_URL" ]; then
+              echo "📦 GitHub Release(完整版+1080p精简版+封面): ${RELEASE_URL}"
+            else
+              echo "📦 GitHub Release: ⚠️ 本次生成失败，稍后 cron 自动重试"
+            fi
+            echo ""
+            echo "📄 字幕 zh.srt 见上述 Release 资产"
+          } > "$DESP_FILE"
           curl -s "https://sctapi.ftqq.com/${SERVERCHAN_KEY}.send" \
-            -d "title=新视频处理完成（已烧录中文字幕）" \
-            -d "desp=${TITLE_LINE}${LINKS}" || true
+            --data-urlencode "title=新视频处理完成（已烧录中文字幕）" \
+            --data-urlencode "desp@${DESP_FILE}" || true
+          rm -f "$DESP_FILE"
 
       - name: 标记已处理并提交 state.json
         # 仅当发布真正成功(Step4 release outcome=success)才写维护表，
