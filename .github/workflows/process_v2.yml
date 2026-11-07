@@ -306,6 +306,7 @@ jobs:
           VIDEO_ID: ${{ steps.resolve.outputs.vid }}
           COVER_URL: ${{ steps.cover.outputs.url }}
           ZH_TITLE: ${{ steps.title_zh.outputs.zh_title }}
+          INPUT_VIDEO_ID: ${{ inputs.video_id }}
         run: |
           if [ -z "$SERVERCHAN_KEY" ]; then echo "no SERVERCHAN_KEY, skip"; exit 0; fi
           TITLE=$(python -c "import json;print(json.load(open('work/notube_meta.json')).get('title','video'))" 2>/dev/null || echo "video")
@@ -319,6 +320,27 @@ jobs:
             DL_1080P="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${ENC}"
           else
             DL_1080P=""
+          fi
+          # ── 新鲜度门：仅“今日更新”才推送 Server酱，避免补处理陈年 backlog 时误发第二条推送 ──
+          # 背景：monitor 每轮只处理“最新未处理”视频，一天多次触发会把此前失败/漏处理的旧片当作
+          # “下一条未处理”在后续轮次补跑出来，发出与“今日更新”无关的第二条推送（如今天 1shj7jy7aPM）。
+          # 修复：视频发布超过 FRESH_HOURS 小时则不推送（仍照常烧录+发布 Release，内容不丢，
+          # 只是在 Server酱 通知里不出现）。发布时间缺失(不可靠)时按“推送”处理，避免漏推真新片。
+          # 手动指定 video_id 重跑时（INPUT_VIDEO_ID 非空）不做新鲜度门，总是推送。
+          FRESH_HOURS=36
+          SHOULD_PUSH=1
+          if [ -z "$INPUT_VIDEO_ID" ]; then
+            PUB=$(python3 -c "import json; d=json.load(open('new_videos.json')); print(d[0].get('published','') if d else '')" 2>/dev/null || true)
+            if [ -n "$PUB" ]; then
+              AGE_H=$(python3 -c "import datetime; from datetime import timezone; dt=datetime.datetime.fromisoformat('$PUB'.replace('Z','+00:00')); print(int((datetime.datetime.now(timezone.utc)-dt).total_seconds()//3600))" 2>/dev/null || echo '-1')
+              if [ "$AGE_H" != "-1" ] && [ "$AGE_H" -gt "$FRESH_HOURS" ]; then
+                SHOULD_PUSH=0
+              fi
+            fi
+          fi
+          if [ "$SHOULD_PUSH" = "0" ]; then
+            echo "⚠️ 视频发布于 ${AGE_H:-?}h 前（非今日更新，属 backlog 补处理），跳过 Server酱 推送（已照常烧录并发布 Release）"
+            exit 0
           fi
           # 用真实换行把内容写进文件，再交给 curl --data-urlencode 做正确百分号编码。
           # 关键修复：此前把标题原样拼进 -d "desp=..."，标题里的 & = 等字符会破坏
