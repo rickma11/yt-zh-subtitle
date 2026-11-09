@@ -1,0 +1,111 @@
+name: Probe official subs on CI IP
+
+# 一次性探针：验证 GitHub Actions runner（数据中心 IP）能否用
+# youtube-transcript-api 取到官方 en 字幕。
+# 独立运行，不改动 process_v2.yml；结果回写 ci_probe/ 供本地 git pull 读取
+# （本机无 GITHUB_TOKEN，无法下载 artifact，故用回写文件代替）。
+on:
+  workflow_dispatch:
+    inputs:
+      video_ids:
+        description: '空格分隔的 YouTube 视频 ID'
+        required: false
+        default: 'b5ROROjCLXg eKTGuaj-Jus 8bQdPR9v9vE 1shj7jy7aPM'
+  push:
+    paths:
+      # 仅探针自身变更才触发；回写的结果文件不会造成循环触发
+      - '.github/workflows/probe_official_subs.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: probe-official-subs
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install youtube-transcript-api
+        run: python -m pip install --quiet youtube-transcript-api
+
+      - name: Probe official en subs from runner IP
+        id: probe
+        env:
+          VIDEO_IDS: ${{ inputs.video_ids || 'b5ROROjCLXg eKTGuaj-Jus 8bQdPR9v9vE 1shj7jy7aPM' }}
+        run: |
+          set +e
+          mkdir -p ci_probe
+          RESULT=ci_probe/official_subs_result.txt
+          {
+            echo "==== CI 官方字幕探针 ===="
+            echo "run_id   : ${{ github.run_id }}"
+            echo "runner   : ${{ runner.os }} / $(hostname)"
+            echo "commit   : ${{ github.sha }}"
+            echo "time_utc : $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo "python   : $(python --version 2>&1)"
+            echo "yta      : $(python -c 'import youtube_transcript_api as y; print(y.__version__)' 2>&1)"
+            echo ""
+            echo "==== 网络连通性 ===="
+          } > "$RESULT"
+          curl -s -o /dev/null -w "youtube watch page : HTTP %{http_code}  %{time_total}s\n" --max-time 20 \
+            "https://www.youtube.com/watch?v=b5ROROjCLXg" >> "$RESULT" 2>&1 \
+            || echo "youtube watch page : curl 失败" >> "$RESULT"
+          curl -s -o /dev/null -w "timedtext endpoint : HTTP %{http_code}  %{time_total}s\n" --max-time 20 \
+            "https://www.youtube.com/api/timedtext?v=b5ROROjCLXg&lang=en" >> "$RESULT" 2>&1 \
+            || echo "timedtext endpoint : curl 失败" >> "$RESULT"
+          echo "" >> "$RESULT"
+          echo "==== 逐视频结果 ====" >> "$RESULT"
+          TOTAL=0
+          OK=0
+          for VID in $VIDEO_IDS; do
+            TOTAL=$((TOTAL + 1))
+            OUTDIR="ci_probe/work_$VID"
+            mkdir -p "$OUTDIR"
+            echo "----- $VID -----" >> "$RESULT"
+            T0=$(date +%s)
+            VID="$VID" OUTDIR="$OUTDIR" python scripts/fetch_official_subs.py >> "$RESULT" 2>&1
+            RC=$?
+            echo "exit_code=$RC  elapsed=$(( $(date +%s) - T0 ))s" >> "$RESULT"
+            if [ -f "$OUTDIR/en.srt" ]; then
+              echo "en.srt segs=$(grep -cE '^[0-9]+$' "$OUTDIR/en.srt")  bytes=$(wc -c < "$OUTDIR/en.srt")" >> "$RESULT"
+              echo "first_seg: $(sed -n '3p' "$OUTDIR/en.srt")" >> "$RESULT"
+            else
+              echo "en.srt: NOT FOUND" >> "$RESULT"
+            fi
+            [ "$RC" -eq 0 ] && OK=$((OK + 1))
+            echo "" >> "$RESULT"
+          done
+          echo "==== SUMMARY: $OK / $TOTAL 成功 ====" >> "$RESULT"
+          cat "$RESULT"
+          echo "ok=$OK" >> "$GITHUB_OUTPUT"
+          echo "total=$TOTAL" >> "$GITHUB_OUTPUT"
+
+      - name: Upload probe artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: official-subs-probe-${{ github.run_id }}
+          path: ci_probe/
+          if-no-files-found: warn
+
+      - name: Commit result back to repo
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ci_probe/official_subs_result.txt || true
+          if git diff --cached --quiet; then
+            echo "结果无变化，跳过提交"
+          else
+            git commit -m "ci-probe: official subs on runner IP (run ${{ github.run_id }})"
+            git push
+          fi
