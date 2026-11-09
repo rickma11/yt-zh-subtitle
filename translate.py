@@ -56,6 +56,18 @@ def _is_english(s):
     return bool(_LAT.search(s)) and not _HAN.search(s)
 
 
+def _flatten(s):
+    """把译文压成单行：换行/回车替换为空格并压缩空白。
+
+    硬性要求 #1「不合并、不拆分、不新增段落」的结构性保障：LLM 偶尔会为长句
+    返回多行文本，若直接写进 srt 会被当成多段、破坏与英文 1:1 段数对齐。
+    这里在每段落库前统一压平，确保一段英文 -> 一段中文（单行）。
+    """
+    if not s:
+        return s
+    return re.sub(r"\s+", " ", s).strip()
+
+
 def _log(msg):
     """日志统一走 stderr：stdout 只留纯结果，防止污染调用方的 stdout 捕获。"""
     print(msg, file=sys.stderr, flush=True)
@@ -216,7 +228,7 @@ def translate(text, sl="auto", tl="zh-CN", rounds=5):
     text = polish.preprocess(text)
     for i in range(rounds):
         try:
-            return polish.polish(_translate_one_chain(text, sl, tl))
+            return polish.polish(_flatten(_translate_one_chain(text, sl, tl)))
         except Exception as e:  # noqa: BLE001
             _log(f"    [translate] 标题翻译第 {i + 1}/{rounds} 轮失败: {e}")
             if i < rounds - 1:
@@ -274,7 +286,7 @@ def translate_many(texts, sl="auto", tl="zh-CN", pace=1.0, log_every=25,
             failed_idx.append(i - 1)
             if res is None:
                 res = t  # 临时占位，二刷覆盖
-        out.append(res)
+        out.append(_flatten(res))
         if i % log_every == 0:
             _log(f"    [translate] 首轮 {i}/{total} (待二刷 {len(failed_idx)} 段)")
         time.sleep(pace if not google_dead else 0.3)
@@ -286,7 +298,7 @@ def translate_many(texts, sl="auto", tl="zh-CN", pace=1.0, log_every=25,
         for n, idx in enumerate(failed_idx, 1):
             t = texts[idx]
             try:
-                out[idx] = _translate_one_chain(t, sl, tl)
+                out[idx] = _flatten(_translate_one_chain(t, sl, tl))
                 ok += 1
             except Exception as e:  # noqa: BLE001
                 _log(f"    [translate] 二刷第 {n} 段仍失败，保留原文: {e}")
@@ -303,8 +315,8 @@ def translate_many(texts, sl="auto", tl="zh-CN", pace=1.0, log_every=25,
             f"超过阈值 {fail_ratio:.0%}，job 失败以便下次 cron 重跑（不静默出英文片）")
     _log(f"    [translate] 完成 {total} 段，仍英文 {len(still)} 段（占比 {ratio:.0%}）")
 
-    # 出口统一本地化润色（FC27/足球术语 + 口语化）
-    return [polish.polish(x) for x in out]
+    # 出口统一本地化润色（FC27/足球术语 + 口语化），并再次压平保证单行
+    return [polish.polish(_flatten(x)) for x in out]
 
 
 if __name__ == "__main__":

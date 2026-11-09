@@ -43,7 +43,8 @@ _PRE_COMPILED = sorted(
     key=lambda x: len(x[2]), reverse=True
 )
 # 位置缩写：词边界 + 区分大小写
-_PRE_CS_COMPILED = [(re.compile(r"(?<![A-Za-z])" + re.escape(en) + r"(?![A-Za-z])"),
+# 注意：lookbehind 排除数字，避免 "60cm"（厘米）被当成位置缩写 cm（中场）误伤
+_PRE_CS_COMPILED = [(re.compile(r"(?<![A-Za-z0-9])" + re.escape(en) + r"(?![A-Za-z0-9])"),
                      zh, en) for en, zh in PRE_TERMS_CS.items()]
 # 译后校正：按 key 长度降序，保证长串（如「这一个L」）先于短串（如「是L」）命中，
 # 避免短规则把长规则要匹配的上下文提前改坏

@@ -149,6 +149,11 @@ jobs:
           PYTHONUTF8: '1'
         run: python scripts/finalize.py
 
+      - name: Step3.1 字幕交付前自检（硬性要求 #10）
+        if: steps.resolve.outputs.vid != ''
+        run: python scripts/validate_zh.py
+        continue-on-error: false
+
       - name: Step3.5 获取视频封面 (thumbnail)
         id: cover
         if: steps.resolve.outputs.vid != ''
