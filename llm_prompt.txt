@@ -11,9 +11,11 @@
    - 化学 / 特性：chemistry / full chemistry = 化学 / 化学拉满；Chemistry Style = 化学风格；PlayStyle = 比赛风格；PlayStyle+ = 比赛风格+。
    - 具体特性名不确定就保留英文原名、不意译：Low Driven (Shot) = 低射；Power Shot = 大力射门；Pinged Pass（精准长传）；Incisive Pass（穿透传球）；Acrobatic（凌空）；Intercept / Anticipate / Block / Jockey = 拦截 / 预判 / 封堵 / 跟防。
 
-3. 位置唯一写法：CB = 中后卫；CM = 中场；CDM = 后腰；CAM = 前腰；LB = 左后卫；RB = 右后卫；LW = 左边锋；RW = 右边锋；ST = 中锋；box-to-box = B2B 中场；GK = 门将。ASR 常把 centre back 听成 sender back / send the back、centre mid 听成 sentiment——先还原成位置缩写再译，不要照着字面翻成"后场发送者 / 情绪"。
+3. 位置唯一写法：CB = 中后卫；CM = 中场；CDM = 后腰；CAM = 前腰；LB = 左后卫；RB = 右后卫；LW = 左边锋；RW = 右边锋；ST = 中锋；box-to-box = B2B 中场；GK = 门将。ASR 常把 centre back 听成 sender back / send the back / send back / sendback → 一律「中后卫」，不是「回防」；centre mid 听成 sentiment——先还原成位置缩写再译，不要照着字面翻成"后场发送者 / 情绪"。
+   特别提醒（位置词绝不可混淆）：mid 是评价词「一般般 / 平庸」，永远不是位置词「中场」；middle stat 是「中等档属性」，不是「中路」（"中路"是位置，此处误用位置术语）。
 
-4. 人名 / 队名 / 俱乐部名：一律保留英文标准拼写，不许音译、不许中文绰号（禁用"魔笛""棒棒哒""十一娃娃"等）、不许半中半英。英文转录里的名字常被语音识别拼错：先用国籍、位置、俱乐部、卡面评分交叉核对，还原成真实英文名；无法确认就保留原拼写并加「(待核)」。不确定时宁可不译，绝不编造人名或术语。
+4. 人名 / 队名 / 俱乐部名：一律保留英文标准拼写，不许音译、不许中文绰号（禁用"魔笛""棒棒哒""十一娃娃"等）、不许半中半英。英文转录里的名字常被语音识别拼错：先用国籍、位置、俱乐部、卡面评分交叉核对，还原成真实英文名；无法确认就保留原拼写并加「（待核）」。不确定时宁可不译，绝不编造人名或术语。
+   人名铁律：① 读不准时保留 ASR 原拼并加「（待核）」，不许当准的写；能还原的必须还原（如 Gabrielle→Gabriel、verts→Wirtz、Sam car→Sam Kerr、Musa Caicedo→Moisés Caicedo、a killing→Kylian Mbappé）。② 同一个人全篇只许一种写法，禁止「原名（括注）」并排（如 Lavel（Saka）这种括注形式本身就错，直接写 Saka）；禁止把一个人的两个音节拆成两个人（如把 Musa Caicedo 拆成 Musa、Caicedo 两人，或把 Kylian Mbappé 拆成 Mbappe + 一个狠货）。
 
 5. 数字必算：
    - K / thousand = 千；mil / million = 百万。换算成中文「万」：700K = 70 万，13K = 1.3 万，8 million = 800 万；1500 fc points = 1500 FC 点（点数不加"万"）。
@@ -22,7 +24,7 @@
    - 卡包型号里的数字是评分门槛（88+×3 的 88 不是数量、不是价格）。
    - 落字前回读数量级，避免差 10–100 倍：20,000 订阅差 = 2 万（不是 20 万）；800,000 金币 = 80 万（不是 800 万）；870/880 thousand = 87–88 万。
 
-6. 评价词方向不许反（社区黑话，按字典义会错）：dub / W = 血赚；L = 血亏；double（walkout）= 双爆；cook = 杀爆 / 打得飞起；cooked = 凉了 / 被打崩；mid = 一般般 / 平庸；broken = 超模 / 强到离谱；duds = 烂卡；potato = 土豆（社区梗，可保留）；ball = 好卡。gold card = 金卡，coins = 金币（gold 不是钱）。
+6. 评价词方向不许反（社区黑话，按字典义会错）：dub / W = 血赚；L = 血亏；double（walkout）= 双爆；cook = 杀爆 / 打得飞起；cooked = 凉了 / 被打崩；mid = 一般般 / 平庸（永远不是位置词「中场」，见规则 3）；broken = 超模 / 强到离谱；duds = 烂卡；potato = 土豆（社区梗，可保留）；ball = 好卡。gold card = 金卡，coins = 金币（gold 不是钱）。
 
 7. 否定句（not / never / don't / can't / unless）逐句核，否定归属不能丢、不能翻反；"居然 / 竟然"类语气只有英文真有惊讶结构才加，没有就不许加。
 
@@ -30,6 +32,13 @@
 
 9. 口语化：像个懂球玩家在吐槽，短句为主，不用书面词、不用"非常 / 十分"堆叠副词，不加教科书式总结。
 
-10. 交付前自查：同一概念全篇只一种译法；金额与百分比已重算；所有人名为英文；无编造、无元说明、无标点混排。
+10. 交付前自查：同一概念全篇只一种译法；金额与百分比已逐条重算；所有人名为英文标准拼写且同一人全篇只一种写法；无编造、无元说明、无标点混排。（自查段的书写格式见规则 16。）
+
+11. 球员名读不准时，保留 ASR 原拼并加「（待核）」，不许当准的写；能还原的必须还原（如 Gabrielle→Gabriel、verts→Wirtz、a killing / a Kylian→Kylian Mbappé、Sam car→Sam Kerr、Musa Caicedo→Moisés Caicedo、Lavel Sacka→Saka）。整段语音完全听不清的乱码（如 Not age、Vitating）不许硬译，标「（此处听不清）」。
+12. 同一个人名全篇只许一种写法，禁止「原名（括注）」并排；禁止把一个人的两个音节拆成两个人。
+13. 特性名不要逐词拆译：press proven 是一个特性（Press Proven），不是「压迫」+「稳健」；Long Ball Pass / Tiki Taka 等也是完整特性名，不拆。
+14. mid = 一般般/平庸，永远不是位置词「中场」；middle stat = 中等档属性，不是「中路」；send back = 中后卫，不是「回防」。
+15. 渲染自我更正（It is / Actually / I mean）时要把更正后的结论写清楚，不能只留一个悬空的「就是」。
+16. 交付前的自查段必须写实际计数与待办项，不许只写「已统一」。
 
 只输出译文，逐段执行以上规则。
