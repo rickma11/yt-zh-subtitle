@@ -1,0 +1,36 @@
+==== CI 官方字幕探针 ====
+run_id   : 42599165497
+runner   : Linux / runnervm7aw5e
+commit   : 21b4280df7c609506eff39198254d06ba3bf715b
+time_utc : 2026-11-09 10:12:28 UTC
+python   : Python 3.12.16
+yta      : Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+AttributeError: module 'youtube_transcript_api' has no attribute '__version__'
+
+==== 网络连通性 ====
+youtube watch page : HTTP 200  0.558017s
+timedtext endpoint : HTTP 200  0.039289s
+
+==== 逐视频结果 ====
+----- b5ROROjCLXg -----
+[official-subs] FATAL list 失败（很可能 runner 被 bot 墙 / 视频不可用）: RequestBlocked()
+exit_code=1  elapsed=0s
+en.srt: NOT FOUND
+
+----- eKTGuaj-Jus -----
+[official-subs] FATAL list 失败（很可能 runner 被 bot 墙 / 视频不可用）: RequestBlocked()
+exit_code=1  elapsed=1s
+en.srt: NOT FOUND
+
+----- 8bQdPR9v9vE -----
+[official-subs] FATAL list 失败（很可能 runner 被 bot 墙 / 视频不可用）: RequestBlocked()
+exit_code=1  elapsed=1s
+en.srt: NOT FOUND
+
+----- 1shj7jy7aPM -----
+[official-subs] FATAL list 失败（很可能 runner 被 bot 墙 / 视频不可用）: RequestBlocked()
+exit_code=1  elapsed=1s
+en.srt: NOT FOUND
+
+==== SUMMARY: 0 / 4 成功 ====
