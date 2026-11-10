@@ -154,6 +154,15 @@ jobs:
         run: python scripts/validate_zh.py
         continue-on-error: false
 
+      - name: Step3.1 自检失败告警（保证不静默退出）
+        if: failure() && steps.resolve.outputs.vid != ''
+        env:
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+        run: |
+          curl -s "https://sctapi.ftqq.com/${SERVERCHAN_KEY}.send" \
+            --data-urlencode "title=⚠️ 字幕自检失败，本次视频未发布" \
+            --data-urlencode "desp=run ${GITHUB_RUN_ID}：Step3.1 validate_zh.py 存在硬性失败，Release/网盘/推送/标记已处理均被跳过。请查看 Actions 日志，修复后重跑。" || true
+
       - name: Step3.5 获取视频封面 (thumbnail)
         id: cover
         if: steps.resolve.outputs.vid != ''
