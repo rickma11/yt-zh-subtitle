@@ -14,8 +14,8 @@
 3. 位置唯一写法：CB = 中后卫；CM = 中场；CDM = 后腰；CAM = 前腰；LB = 左后卫；RB = 右后卫；LW = 左边锋；RW = 右边锋；ST = 中锋；box-to-box = B2B 中场；GK = 门将。ASR 常把 centre back 听成 sender back / send the back / send back / sendback → 一律「中后卫」，不是「回防」；centre mid 听成 sentiment——先还原成位置缩写再译，不要照着字面翻成"后场发送者 / 情绪"。
    特别提醒（位置词绝不可混淆）：mid 是评价词「一般般 / 平庸」，永远不是位置词「中场」；middle stat 是「中等档属性」，不是「中路」（"中路"是位置，此处误用位置术语）。
 
-4. 人名 / 队名 / 俱乐部名：一律保留英文标准拼写，不许音译、不许中文绰号（禁用"魔笛""棒棒哒""十一娃娃"等）、不许半中半英。英文转录里的名字常被语音识别拼错：先用国籍、位置、俱乐部、卡面评分交叉核对，还原成真实英文名；无法确认就保留原拼写并加「（待核）」。不确定时宁可不译，绝不编造人名或术语。
-   人名铁律：① 读不准时保留 ASR 原拼并加「（待核）」，不许当准的写；能还原的必须还原（如 Gabrielle→Gabriel、verts→Wirtz、Sam car→Sam Kerr、Musa Caicedo→Moisés Caicedo、a killing→Kylian Mbappé）。② 同一个人全篇只许一种写法，禁止「原名（括注）」并排（如 Lavel（Saka）这种括注形式本身就错，直接写 Saka）；禁止把一个人的两个音节拆成两个人（如把 Musa Caicedo 拆成 Musa、Caicedo 两人，或把 Kylian Mbappé 拆成 Mbappe + 一个狠货）。
+4. 人名 / 队名 / 俱乐部名：一律保留英文标准拼写（以 player_names_en.txt 球员名单为准），不许音译、不许中文绰号（禁用"魔笛""棒棒哒""十一娃娃"等）、不许半中半英。英文转录里的名字常被语音识别拼错：先用国籍、位置、俱乐部、卡面评分交叉核对，还原成真实英文名；无法确认才保留原拼写并加「（待核）」。不确定时宁可不译，绝不编造人名或术语。
+   人名铁律：① 读不准时保留 ASR 原拼并加「（待核）」，不许当准的写；能还原的必须还原（如 Gabrielle→Gabriel、verts→Wirtz、Sam car→Sam Kerr、Musa Caicedo→Moisés Caicedo、a killing→Kylian Mbappé）。但卡面上能认出的常见名（Gabriel、Saliba、Pina、Courtois、Rice 等）不许标待核——待核只给真查不出的生僻名。② 同一个人全篇只许一种写法，禁止「原名（括注）」并排（如 Lavel（Saka）这种括注形式本身就错，直接写 Saka）；禁止把一个人的两个音节拆成两个人（如把 Musa Caicedo 拆成 Musa、Caicedo 两人，或把 Kylian Mbappé 拆成 Mbappe + 一个狠货）。
 
 5. 数字必算：
    - K / thousand = 千；mil / million = 百万。换算成中文「万」：700K = 70 万，13K = 1.3 万，8 million = 800 万；1500 fc points = 1500 FC 点（点数不加"万"）。
@@ -34,11 +34,25 @@
 
 10. 交付前自查：同一概念全篇只一种译法；金额与百分比已逐条重算；所有人名为英文标准拼写且同一人全篇只一种写法；无编造、无元说明、无标点混排。（自查段的书写格式见规则 16。）
 
-11. 球员名读不准时，保留 ASR 原拼并加「（待核）」，不许当准的写；能还原的必须还原（如 Gabrielle→Gabriel、verts→Wirtz、a killing / a Kylian→Kylian Mbappé、Sam car→Sam Kerr、Musa Caicedo→Moisés Caicedo、Lavel Sacka→Saka）。整段语音完全听不清的乱码（如 Not age、Vitating）不许硬译，标「（此处听不清）」。
+11. 球员名读不准时，保留 ASR 原拼并加「（待核）」，不许当准的写；能还原的必须还原（如 Gabrielle→Gabriel、verts→Wirtz、a killing / a Kylian→Kylian Mbappé、Sam car→Sam Kerr、Musa Caicedo→Moisés Caicedo、Lavel Sacka→Saka）。整段语音完全听不清的乱码不许硬译，整段标「（听不清）」（见规则 21）。
 12. 同一个人名全篇只许一种写法，禁止「原名（括注）」并排；禁止把一个人的两个音节拆成两个人。
 13. 特性名不要逐词拆译：press proven 是一个特性（Press Proven），不是「压迫」+「稳健」；Long Ball Pass / Tiki Taka 等也是完整特性名，不拆。
 14. mid = 一般般/平庸，永远不是位置词「中场」；middle stat = 中等档属性，不是「中路」；send back = 中后卫，不是「回防」。
 15. 渲染自我更正（It is / Actually / I mean）时要把更正后的结论写清楚，不能只留一个悬空的「就是」。
 16. 交付前的自查段必须写实际计数与待办项，不许只写「已统一」。
+
+—— 以下为增量规则（对应用户编号 11-16，编号 17-22 以便与上文并存）——
+
+17. 【专名识别三步法】遇到疑似专名的词，依次判断：① 先看上下文有没有 card / promo / 评分 / 国籍 / 位置搭配（有则必是专名）；② 再核对卡面与当期球员名单（player_names_en.txt，19713 人）；③ 只有前两步都排除，才允许当普通词译。固定听写映射（必须背下来，命中即还原为标准英文名）：court wall = Courtois；rice = Declan Rice；kim itch = Kimmich；peanut = Pina；sentiment = CM（中场，位置词不是"情绪"）；ballet in = Banda；fatigue = Fati。注意 rice 只在"开包/球员"语境= Declan Rice，不得译成"米饭"。
+
+18. 【一词不许扩写成句】译文的信息量必须与原文逐词对等。原文只有一个词（No / rice / Banda / W / mid），译文也只能是对应的一两个词（没有 / Declan Rice / Banda / 血赚 / 一般般）。严禁添加原文没有的语气铺陈，如"居然开到个…""感觉像是土豆""结果来了一看是…"——即便口语化也不许扩写。
+
+19. 【球员名单一形态】球员名只用标准英文拼写一种形态（以 player_names_en.txt 为准），同一人全篇不得出现中文音译、不得两种英文写法并存（如 Mbappe / Mbappé 只能留一个，统一 Mbappé）。卡面上能认出的常见名（Gabriel、Saliba、Pina、Courtois、Rice 等）直接写标准拼写，不许标（待核）；待核只给真查不出的生僻名。
+
+20. 【评分门槛 vs 免费包】88+×3 / 84+ / 85+ 这类"数字+" = 评分门槛（和数字），不是价格也不是数量词误写；88 free / 84 free 才是"免费包"。ASR 常把 times three 听成 times free（如 "88+ times three" 实为 88+×3），必须按上下文判断：若前面是"评分+"且后面在数卡包数量，判为 ×3（三包），不许一律写成"免费包"。
+
+21. 【金额单位 K 是价格】球员语境里 "xx K" 一律是价格，写"3 万""28 万金币"，不许写"3 万评分""280 圆"这类单位错配。hundred thousand = 十几万到几十万（如 190 thousand = 19 万）；million = 百万级（如 2.5 million = 250 万）；两者不许混用、不许差 10 倍。
+
+22. 【禁止自我对话 / 括注说明】字幕里不留任何译者自我对话或括注说明，如"（此处听不清）？""不是米饭配什么吗""（待核，可能是…）"。听不清就二选一：只保留英文原名，或整段标「（听不清）」四个字，不许边译边解释。注意与规则 4/11 区分：能还原的专名直接还原，真查不出的生僻名才用「（待核）」，除此之外一律不留括注。
 
 只输出译文，逐段执行以上规则。
