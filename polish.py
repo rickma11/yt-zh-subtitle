@@ -73,6 +73,15 @@ def preprocess(text):
             text = rx.sub(lambda _m: zh, text)
     if not PRE_TERMS:
         return text
+    # 已替换出的内容先存进占位符，避免后续短键二次命中长键的产物：
+    # 例："rice with" -> "Declan Rice" 后，短键 "rice" 若再扫一遍会变成
+    # "Declan Declan Rice"（2026-11-11 合并版落地时发现）。
+    slots = []
+
+    def stash(zh):
+        slots.append(zh)
+        return "\x00%d\x00" % (len(slots) - 1)
+
     for rx, zh, en in _PRE_COMPILED:
         if not rx.search(text):
             continue
@@ -82,7 +91,9 @@ def preprocess(text):
         # 键名大小写不敏感比对（skip_context 历史条目大小写不统一）
         if any(k.lower() == en.lower() and p.search(tail) for k, p in _SKIP):
             continue
-        text = rx.sub(lambda _m: zh, text)
+        text = rx.sub(lambda _m, z=zh: stash(z), text)
+    for i, zh in enumerate(slots):
+        text = text.replace("\x00%d\x00" % i, zh)
     return text
 
 

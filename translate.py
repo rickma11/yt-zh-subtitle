@@ -124,9 +124,13 @@ def _mymemory_translate(text, sl="auto", tl="zh-CN"):
 
 
 def _load_llm_prompt():
-    """加载 LLM system prompt（llm_prompt.txt，编码翻译规范 R1-R7）。
+    """加载 LLM system prompt。
 
-    文件缺失时回退到内置精简版，保证 CI 不因少文件而挂。
+    投喂顺序遵循《FC27 字幕中译规范（合并版 2026-11-11）》第 0 节：
+    先注入术语锁定表 + 人名规则（terms_lock.md）当词表，再给 20 条指令
+    （llm_prompt.txt）当 system prompt。顺序反了 AI 会现编专名。
+
+    任一文件缺失时回退到内置精简版，保证 CI 不因少文件而挂。
     """
     fallback = (
         "你是一个专业的 FC27/EAFC 足球游戏视频字幕翻译器。"
@@ -136,13 +140,27 @@ def _load_llm_prompt():
         "3. 卡包规格写 86+×5 / 88+×3；金币换算成万；国籍=球员国籍不是语言。\n"
         "4. 严禁编造原文没有的内容；口语化；只输出译文。"
     )
+    here = os.path.dirname(os.path.abspath(__file__))
     try:
-        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "llm_prompt.txt")
-        with open(p, encoding="utf-8") as f:
-            t = f.read().strip()
-        return t if t else fallback
+        with open(os.path.join(here, "llm_prompt.txt"), encoding="utf-8") as f:
+            instruction = f.read().strip()
+        if not instruction:
+            return fallback
     except OSError:
         return fallback
+    try:
+        with open(os.path.join(here, "terms_lock.md"), encoding="utf-8") as f:
+            terms = f.read().strip()
+    except OSError:
+        terms = ""
+    if not terms:
+        return instruction
+    return (
+        "以下是本视频的术语锁定表与人名规则（词表，必须优先遵守）：\n"
+        + terms
+        + "\n\n—— 词表结束，以下是翻译指令 ——\n"
+        + instruction
+    )
 
 
 def _llm_translate(text, sl="auto", tl="zh-CN", retries=2):
