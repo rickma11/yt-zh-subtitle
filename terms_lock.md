@@ -26,10 +26,10 @@
 | FUT Gallery / Gallery Token | FUT收藏馆 / 收藏馆代币 | — |
 | FC Heritage / Circuit | FC传承 / FC传承巡回 | fc传承 Circuit |
 | Live Events | 实时赛事 | — |
-| Conference League | 欧协联 | 会议、冠军赛 |
+| Conference League | 欧协联 | 会议 |
 | Women's Champions League | 女足欧冠 | 女子冠军赛、女冠军Z卡 |
 | Europa League | 欧联 | 欧罗巴联赛（须全篇统一） |
-| Champions（卡种前缀） | 欧冠 | 冠军卡 |
+| Champions（卡种前缀） | 冠军赛 | 冠军卡 |
 | Hero / Icon | 英雄卡 / 传奇卡 | 英雄、传奇球星（混用） |
 | promo | 活动（卡） | 促销 |
 | Winter Wildcard | 冬野卡 | 冬日 wild card |

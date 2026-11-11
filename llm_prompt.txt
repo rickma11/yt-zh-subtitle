@@ -7,10 +7,10 @@
 2. 中文句内不用英文标点；数字用半角；不混入日文假名等其他字符。
 
 【术语】
-3. 术语按唯一写法，全篇不许换：Road to the Knockout=RTTK（晋级淘汰赛）；FUT Champions=FUT冠军；Team of the Week=周最佳阵容；Conference League=欧协联；Women's Champions League=女足欧冠；Champions（卡种）=欧冠；Winter Wildcard=冬野卡；Ultimate Scream=终极尖叫；Scream Token=尖叫代币；FC Heritage=FC传承；walkout=爆卡出场；holographic=全息；quick sell=快速出售；PlayStyle=比赛风格；PlayStyle+=比赛风格+；chemistry=化学；fodder=狗粮；pack（动词）=开出。
+3. 术语按唯一写法，全篇不许换：Road to the Knockout=RTTK（晋级淘汰赛）；FUT Champions=FUT冠军；Team of the Week=周最佳阵容；Conference League=欧协联；Women's Champions League=女足欧冠；Champions（卡种）=冠军赛；Winter Wildcard=冬野卡；Ultimate Scream=终极尖叫；Scream Token=尖叫代币；FC Heritage=FC传承；walkout=爆卡出场；holographic=全息；quick sell=快速出售；PlayStyle=比赛风格；PlayStyle+=比赛风格+；chemistry=化学；fodder=狗粮；pack（动词）=开出。
 4. 位置只用：CB 中后卫、CM 中场、CDM 后腰、CAM 前腰、LM/RM 左右中场、LW/RW 左右边锋、ST 中锋；box-to-box=B2B 中场；winger=边锋。
 5. 卡包名四要素逐项对齐原句：评分门槛照抄（82/83/84/85/86/88）；门槛后有 plus 才写“+”，没有就不写；times three/five/ten/four → ×3/×5/×10/×4；free → 免费包。所以 88 free=「88 免费包」，85 plus times free=「85+ 免费包」，88 plus times three=「88+×3」。
-6. 术语要么全中文、要么全英文（球员名与代号保留英文），禁止「中文修饰+英文名词」的半译：冬野卡不是冬日 wild card，欧冠卡不是冠军卡。
+6. 术语要么全中文、要么全英文（球员名与代号保留英文），禁止「中文修饰+英文名词」的半译：冬野卡不是冬日 wild card，冠军赛不是冠军卡。
 
 【人名】
 7. 所有球员、教练、俱乐部人名一律保留英文标准拼写，不许音译、不许中文绰号、不许半中半英、不许姓名倒置。
