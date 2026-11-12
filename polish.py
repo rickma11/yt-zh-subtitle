@@ -56,11 +56,37 @@ RULES = [
     (re.compile(r"极其(困难|难)"), "特别难"),
     # gtx 机翻 goal -> 「目标」：beautiful goal 译成「美丽的目标」，拉回「进球」
     (re.compile(r"(漂亮|美丽|精彩|伟大|绝妙|惊人)的目标"), r"\1的进球"),
-    # gtx 偶发半角标点 -> 全角
-    (re.compile(r","), "，"),
+    # 数字千分位：LLM 偶发写成全角逗号「2，500」，先转回半角。
+    # 必须放在普通半角->全角规则之前；validate_zh 把「数字间全角逗号」列为硬失败，
+    # 旧规则 (r",", "，") 会把 LLM 正确输出的 2,500 改成 2，500 再被硬失败掐断（2026-11-12 事故）。
+    (re.compile(r"(?<=\d)，(?=\d)"), ","),
+    # gtx 偶发半角标点 -> 全角；但保留数字间的千分位半角逗号
+    (re.compile(r"(?<!\d),(?!\d)"), "，"),
     (re.compile(r";"), "；"),
     (re.compile(r"(?<!\d):(?!\d)"), "："),
 ]
+
+# LLM 在长 system prompt（词表 + 20 条）下偶发对术语本身展开说明，
+# 输出「如果你需要…请提供更具体的问题…我会尽力」之类套话。
+# 这些不是字幕内容，必须在烧录前截掉；命中后保留套话前的最后一个完整句。
+_LLM_META_MARKERS = (
+    "请提供更具体的问题", "请提供更多信息", "我会尽力", "我会尽我所能",
+    "根据提供的术语", "在术语锁定表中", "作为AI", "作为人工智能",
+    "希望这对你有帮助", "希望对你有帮助",
+)
+
+
+def _strip_llm_meta(text):
+    """截掉 LLM 偶发输出的元说明套话；整段都是套话时退回「（听不清）」。"""
+    hits = [text.index(m) for m in _LLM_META_MARKERS if m in text]
+    if not hits:
+        return text
+    head = text[:min(hits)]
+    idx = max(head.rfind("。"), head.rfind("！"), head.rfind("？"))
+    if idx >= 0:
+        head = head[:idx + 1]
+    head = head.strip()
+    return head or "（听不清）"
 
 
 def preprocess(text):
@@ -104,6 +130,7 @@ def polish(text):
     for src, dst in _POST_SORTED:  # 按 key 长度降序，长串先命中
         if src in text:
             text = text.replace(src, dst)
+    text = _strip_llm_meta(text)
     for pat, dst in RULES:
         text = pat.sub(dst, text)
     return text
