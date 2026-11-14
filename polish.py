@@ -75,6 +75,44 @@ _LLM_META_MARKERS = (
     "希望这对你有帮助", "希望对你有帮助",
 )
 
+# 日文假名 -> 中文音译兜底表。
+# 根因（2026-11-14 事故）：LLM 偶发把人名音译成片假名（帕ブロ / 玛リア娜），
+# validate_zh 把「日文字符」列为硬性失败会掐断整条流水线。这里在译后把假名
+# 按音节音译成近似汉字（如 ブロ->布罗、リアナ->里阿娜），保证字幕里不再出现日文字符，
+# 同时给出可读的中文音译。覆盖平/片假名 + 浊音/半浊音 + 小字 + 长音/促音。
+_HIRA = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん"
+_HIRA_ZH = "阿伊乌江奥卡基库凯科萨希苏塞索塔奇茨特托纳尼努涅诺哈希夫赫霍玛米穆梅莫亚尤约拉里鲁列罗瓦奥恩"
+_KANA_MAP = {ch: z for ch, z in zip(_HIRA, _HIRA_ZH)}
+# 浊音 / 半浊音：显式列出（假名码点非连续，不能靠 +1 推算）
+_VOICED = {
+    "か": "が", "き": "ぎ", "く": "ぐ", "け": "げ", "こ": "ご",
+    "さ": "ざ", "し": "じ", "す": "ず", "せ": "ぜ", "そ": "ぞ",
+    "た": "だ", "ち": "ぢ", "つ": "づ", "て": "で", "と": "ど",
+    "は": "ば", "ひ": "び", "ふ": "ぶ", "へ": "べ", "ほ": "ぼ",
+}
+_SEMI = {"は": "ぱ", "ひ": "ぴ", "ふ": "ぷ", "へ": "ぺ", "ほ": "ぽ"}
+for _b, _v in _VOICED.items():
+    _KANA_MAP[_v] = _KANA_MAP[_b]          # 浊音 -> 同音节汉字
+for _b, _s in _SEMI.items():
+    _KANA_MAP[_s] = _KANA_MAP[_b]          # 半浊音 -> 同音节汉字
+# 人名音译微调：ぶ/ブ 是 bu，中文音译用「布」更准确（帕ブロ→帕布罗）；
+# 默认按基础 ふ(fu)→夫 会译成「夫」，这里显式覆盖。
+_KANA_MAP["ぶ"] = "布"
+_KANA_MAP["ブ"] = "布"
+# 小字 / 长音 / 促音
+_KANA_MAP.update({"ゃ": "亚", "ゅ": "尤", "ょ": "约", "っ": "", "ー": ""})
+# 片假名：平假名码点 +0x60 映射到同一套汉字（含浊音/半浊音）
+_KANA_MAP.update({chr(ord(k) + 0x60): v for k, v in _KANA_MAP.items() if k not in ("っ", "ー")})
+_KANA_MAP.update({"ャ": "亚", "ュ": "尤", "ョ": "约", "ッ": "", "ー": ""})
+_KANA_RE = re.compile(r"[\u3040-\u30ff]")
+
+
+def _kana_to_hanzi(text):
+    """把混入的中日假名按音节音译成近似汉字；不在表中的假名直接丢弃，确保输出零日文字符。"""
+    if not _KANA_RE.search(text):
+        return text
+    return "".join(_KANA_MAP.get(ch, "") if _KANA_RE.match(ch) else ch for ch in text)
+
 
 def _strip_llm_meta(text):
     """截掉 LLM 偶发输出的元说明套话；整段都是套话时退回「（听不清）」。"""
@@ -131,6 +169,7 @@ def polish(text):
         if src in text:
             text = text.replace(src, dst)
     text = _strip_llm_meta(text)
+    text = _kana_to_hanzi(text)   # 兜底：清除 LLM 偶发的片假名音译（如 帕ブロ / 玛リア娜）
     for pat, dst in RULES:
         text = pat.sub(dst, text)
     return text

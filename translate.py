@@ -50,6 +50,9 @@ LLM_MODEL = os.environ.get("LLM_MODEL", "deepseek-chat")
 # CJK 判定：含汉字视为已译出中文；含拉丁字母但无汉字视为「仍为英文」
 _HAN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 _LAT = re.compile(r"[A-Za-z]")
+# 日文假名（片假名/平假名）：LLM 偶发把名字音译成假名（帕ブロ / 玛リア娜），
+# 这里用于检测并触发 Google 重译（Google 不会输出假名），失败则留给 polish 兜底音译。
+_KANA = re.compile(r"[\u3040-\u30ff]")
 
 
 def _is_english(s):
@@ -323,6 +326,20 @@ def translate_many(texts, sl="auto", tl="zh-CN", pace=1.0, log_every=25,
                 out[idx] = t
             time.sleep(0.5)
         _log(f"    [translate] 二刷完成，成功补译 {ok}/{len(failed_idx)} 段")
+
+    # ---- 假名清理：LLM 偶发把名字音译成片假名，自检会硬失败 ----
+    # 对仍含假名的段用 Google 重译（Google 不会输出假名），拿到干净中文；
+    # 失败/仍含假名则保留，交给 polish._kana_to_hanzi 兜底音译，绝不阻塞流水线。
+    kana_hits = [i for i in range(total) if _KANA.search(out[i])]
+    if kana_hits:
+        _log(f"    [translate] 发现 {len(kana_hits)} 段含日文假名，尝试 Google 重译")
+        for idx in kana_hits:
+            try:
+                r = _google_translate(texts[idx], sl, tl, retries=1)
+                if r and not _KANA.search(r) and not _is_english(r):
+                    out[idx] = _flatten(r)
+            except Exception:
+                pass
 
     # ---- 中文占比校验门 ----
     still = [i for i in range(total) if _is_english(out[i])]
