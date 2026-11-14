@@ -108,10 +108,17 @@ _KANA_RE = re.compile(r"[\u3040-\u30ff]")
 
 
 def _kana_to_hanzi(text):
-    """把混入的中日假名按音节音译成近似汉字；不在表中的假名直接丢弃，确保输出零日文字符。"""
+    """把混入的日假名按音节音译成近似汉字；不在表中的假名直接丢弃，确保输出零日文字符。
+
+    兜底（2026-11-14 加固）：若输入「全是不可映射的假名」（如纯 ー/ッ 等符号化假名），
+    移除后会变空串，这里回退「（听不清）」占位，绝不输出空段或残留日文字符。
+    """
     if not _KANA_RE.search(text):
         return text
-    return "".join(_KANA_MAP.get(ch, "") if _KANA_RE.match(ch) else ch for ch in text)
+    out = "".join(_KANA_MAP.get(ch, "") if _KANA_RE.match(ch) else ch for ch in text)
+    if not out.strip():
+        return "（听不清）"
+    return out
 
 
 def _strip_llm_meta(text):

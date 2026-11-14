@@ -104,8 +104,13 @@ def main():
     n = min(len(en), len(zh))
     for i in range(n):
         z = zh[i]
+        # 空段硬失败豁免：若英文段本身也为空（whisper 偶发末尾空块），属对称空段，
+        # 不算翻译缺失，跳过（2026-11-14 加固，避免误杀）。
+        # 仅当「英文非空但中文空」才算真缺失。
         if not z:
-            errors.append(f"第 {i+1} 段为空译文")
+            if not en[i]:
+                continue
+            errors.append(f"第 {i+1} 段为空译文（对应英文段非空，属翻译缺失）")
             continue
         # 软性：元说明泄漏（polish 已自动截断，残留仅提醒；绝不硬失败吞片）
         for pat in _META_PATTERNS:

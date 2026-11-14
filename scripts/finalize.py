@@ -116,13 +116,19 @@ def main():
         print(f"  共 {len(segs)} 条")
         texts = [html.unescape(s["text"]).replace("\n", " ") for s in segs]
         done = translate_many(texts, sl="en", log_every=25)
-        polished = [polish(d) for d in done]
-        for s, p in zip(segs, polished):
-            s["text"] = p
-        write_srt(segs, zh_path)
-        print("[finalize] zh.srt 生成完毕")
+        for s, d in zip(segs, done):
+            s["text"] = d
     else:
-        print("[finalize] T1：已存在 zh.srt，跳过翻译")
+        print("[finalize] T1：已存在 zh.srt，加载（统一 polish 清洗）")
+        segs = parse_srt(zh_path)
+
+    # 统一兜底：无论 T1（上游预置，可能未经清洗）还是 T2（translate_many 已 polish），
+    # 都再过一遍 polish，确保 zh.srt 零日文字符、全角千分位转半角、元说明套话截断
+    # （2026-11-14 加固：防止 T1 路径绕过 polish 直接烧录，再次触发 validate 硬失败）。
+    for s in segs:
+        s["text"] = polish(s["text"])
+    write_srt(segs, zh_path)
+    print("[finalize] zh.srt 定稿完毕")
 
     video = os.path.join(WORK, "video.mp4")
     if not os.path.exists(video):

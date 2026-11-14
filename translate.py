@@ -303,10 +303,14 @@ def translate_many(texts, sl="auto", tl="zh-CN", pace=1.0, log_every=25,
                 consec = 0
             except Exception as e2:  # noqa: BLE001
                 _log(f"    [translate] MyMemory 失败，暂留原文待二刷: {e2}")
-        if res is None or _is_english(res):
+        # 空结果（Google 偶发返回空 parts / 全空白）必须当成失败：否则空串写进 zh.srt
+        # 会被 validate 的「空段」硬失败掐断整条流水线（与 11-14 假名事故同类）。
+        # 用原英文 t 占位（非空），二刷覆盖；若 t 本身为空则保留空（validate 对 en/zh 皆空放行）。
+        empty = res is None or not (res or "").strip()
+        if empty or _is_english(res):
             failed_idx.append(i - 1)
-            if res is None:
-                res = t  # 临时占位，二刷覆盖
+            if empty:
+                res = t
         out.append(_flatten(res))
         if i % log_every == 0:
             _log(f"    [translate] 首轮 {i}/{total} (待二刷 {len(failed_idx)} 段)")
@@ -319,8 +323,14 @@ def translate_many(texts, sl="auto", tl="zh-CN", pace=1.0, log_every=25,
         for n, idx in enumerate(failed_idx, 1):
             t = texts[idx]
             try:
-                out[idx] = _flatten(_translate_one_chain(t, sl, tl))
-                ok += 1
+                r = _translate_one_chain(t, sl, tl)
+                flat = _flatten(r)
+                if flat.strip():
+                    out[idx] = flat
+                    ok += 1
+                else:
+                    # 二刷返回空/全空白：保留原英文 t，绝不写空段（防 validate 空段硬失败）
+                    out[idx] = t
             except Exception as e:  # noqa: BLE001
                 _log(f"    [translate] 二刷第 {n} 段仍失败，保留原文: {e}")
                 out[idx] = t
