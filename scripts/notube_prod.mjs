@@ -14,6 +14,25 @@ const MAX_TRIES = 5;
 
 function log(...a) { console.log('[video]', ...a); }
 
+// 浏览器启动：优先用 playwright 自带 chromium；若自带 chromium 缺失或与当前 runner
+// 系统不兼容（如 ubuntu-latest 升级到 ubuntu26.04 后旧版 playwright 直接拒绝安装），
+// 回退到 runner 预装的 Google Chrome（channel: 'chrome'）。
+// 作用：把「装浏览器失败」从「整条流水线死亡」降级为「换个浏览器继续」。
+async function launchBrowser() {
+  const args = ['--no-sandbox', '--disable-blink-features=AutomationControlled'];
+  try {
+    return await chromium.launch({ headless: true, args });
+  } catch (e) {
+    log('WARN 自带 chromium 启动失败，回退 runner 预装 Chrome:', String(e.message || e).split('\n')[0]);
+    try {
+      return await chromium.launch({ headless: true, args, channel: 'chrome' });
+    } catch (e2) {
+      log('ERROR Chrome 兜底同样失败:', String(e2.message || e2).split('\n')[0]);
+      throw e2;
+    }
+  }
+}
+
 // 标题优先走 YouTube oEmbed API：纯 HTTP、返回稳定 JSON，不依赖 notube 页面结构。
 // 背景：notube 改版后转换页 .page-title h1 刮到的是「100%」等非标题元素，故不再依赖刮取。
 async function fetchOembedTitle(vid) {
@@ -126,7 +145,7 @@ async function pollConversion(page, maxMs) {
 }
 
 async function main() {
-  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'] });
+  const browser = await launchBrowser();
   const ctx = await browser.newContext({
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
     viewport: { width: 1280, height: 800 },

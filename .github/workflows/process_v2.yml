@@ -40,8 +40,15 @@ jobs:
 
       - name: Setup Node + Playwright
         run: |
-          npm install playwright@1.57.0 --no-save
-          npx playwright install chromium --with-deps
+          # playwright >= 1.62.0 才支持 ubuntu26.04（GitHub ubuntu-latest 已升级到该镜像）。
+          # 写死 1.57.0 会报 "Playwright does not support chromium on ubuntu26.04-x64"，
+          # 直接挂掉整个 job（2026-11-17 事故：连续 4 次 run 死在 Step4，连选片都没到）。
+          npm install playwright@1.65.1 --no-save
+          # 浏览器安装失败不致命：notube_prod.mjs 会回退到 runner 预装的 Google Chrome
+          # （channel: 'chrome'），这样以后 runner 镜像再升级也不会再吞片。
+          npx playwright install chromium --with-deps \
+            || npx playwright install chromium \
+            || echo "WARN chromium 安装失败，将回退 runner 预装 Chrome (channel: 'chrome')"
 
       - name: Setup Python
         uses: actions/setup-python@v5
