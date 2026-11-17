@@ -1,0 +1,66 @@
+name: Repush Release 通知（链接修正 / 补发）
+
+# 用途：主流程推送里的 GitHub 直链若失效（历史上因 GitHub 规范化资源名导致 404），
+# 或通知丢失，需要按已有 Release 重发一条带「真实直链」的 Server酱 通知。
+# 直链一律从 Release API 读回真实 browser_download_url，不本地拼接，杜绝 404。
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag，例如 auto-20261117-pPc7YgGrKgA'
+        required: true
+      note:
+        description: '附言（可选）'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  repush:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 读回 Release 真实资源名与直链并推送
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          NOTE: ${{ inputs.note }}
+        run: |
+          if [ -z "$SERVERCHAN_KEY" ]; then echo "no SERVERCHAN_KEY, skip"; exit 0; fi
+          eval "$(python3 scripts/release_assets.py --repo "${GITHUB_REPOSITORY}" --tag "$TAG")"
+          if [ -z "$REAL_URL" ]; then
+            echo "FATAL 未取到 Release 资源直链（tag=$TAG）"
+            exit 1
+          fi
+          echo "真实 1080p 资源名: $REAL"
+          echo "真实 1080p 直链: $REAL_URL"
+          # 中文标题：尽力翻译（与主流程同一套 translate.translate），失败则回落英文原文
+          ZH=$(python3 -c "import sys; from translate import translate; print(translate(sys.argv[1]))" "$TITLE" 2>/dev/null || true)
+          if [ -z "$ZH" ]; then ZH="$TITLE"; fi
+          DESP_FILE="$(mktemp)"
+          {
+            echo "📦 GitHub Release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+            if [ -n "$TITLE" ]; then echo "🎬 标题（原文）: ${TITLE}"; fi
+            if [ -n "$ZH" ]; then echo "🎬 标题（中文）: ${ZH}"; fi
+            echo ""
+            echo "📥 GitHub 1080p 直链(直接下载, 无需跳页): ${REAL_URL}"
+            if [ -n "$FULL_URL" ]; then
+              echo "📥 GitHub 完整版直链(原始分辨率): ${FULL_URL}"
+            fi
+            echo ""
+            echo "📄 字幕 zh.srt 见 Release 资产"
+            if [ -n "$NOTE" ]; then
+              echo ""
+              echo "📝 ${NOTE}"
+            fi
+          } > "$DESP_FILE"
+          curl -s "https://sctapi.ftqq.com/${SERVERCHAN_KEY}.send" \
+            --data-urlencode "title=视频下载直链（已修正链接）" \
+            --data-urlencode "desp@${DESP_FILE}" || true
+          rm -f "$DESP_FILE"

@@ -233,10 +233,13 @@ jobs:
           import json,re
           try: t=json.load(open('work/notube_meta.json')).get('title','video')
           except: t='video'
-          # 白名单清洗：仅保留 中英日韩文字/字母/数字/下划线 + 少量标题常用符号(+ - ! & . , ' ( ) [ ])，
-          # 其余(emoji如🔥🤯、箭头、变体选择符等非常规字符)一律剔除，避免文件名/路径出问题
-          t=re.sub(r"[^\w\s+\-!&.,'()\[\]%]",'',t)
-          t=re.sub(r'\s+','_',t)
+          # 白名单清洗：仅保留 中英日韩文字/字母/数字/下划线 + 少量安全符号(+ - . ,)，
+          # 其余(emoji如🔥🤯、箭头、变体选择符等非常规字符)一律剔除，避免文件名/路径出问题。
+          # 【2026-11-17 修复】! 与 & 必须剔除：GitHub 会把它们规范化成 '.'（实测 12 个真实资源：
+          # '!'->'.' 12 次、'&'->'.' 2 次），导致「本地算出的文件名」与「GitHub 实际存储的资源名」
+          # 不一致，拼出来的 1080p 直链 404（用户实际反馈链接打不开）。这里从源头去掉这两个字符。
+          t=re.sub(r"[^\w\s+\-.,]",'',t)
+          t=re.sub(r'\s+','_',t).strip('._-')
           print(t[:60])
           PY
           )
@@ -265,6 +268,19 @@ jobs:
           echo "name_compact=$NAME_COMPACT" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "release_url=https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_OUTPUT"
+          # ── 读回真实资源名与真实直链（2026-11-17 修复直链 404）────────────────
+          # 背景：GitHub 会规范化资源名里的部分字符（! & -> .），所以「本地拼出来的文件名」
+          # 与「Release 里真实存在的资源名」可能不同，直接用本地名拼 URL 会 404
+          # （用户实际反馈推送里的 1080p 直链打不开）。
+          # 这里发布后从 API 读回真实 asset 名与 browser_download_url，Step4d 直接用，
+          # 从根上消除「拼出来的名字 ≠ 实际资源名」这一类问题（以后 GitHub 再改规则也不会错）。
+          eval "$(python3 scripts/release_assets.py --repo "${GITHUB_REPOSITORY}" --tag "$TAG")"
+          if [ -n "$REAL" ] && [ "$REAL" != "$NAME_COMPACT" ]; then
+            echo "NOTE GitHub 规范化了资源名：本地=$NAME_COMPACT 实际=$REAL（直链以实际为准）"
+          fi
+          echo "real_compact=$REAL" >> "$GITHUB_OUTPUT"
+          echo "dl_1080p=$REAL_URL" >> "$GITHUB_OUTPUT"
+          echo "dl_full=$FULL_URL" >> "$GITHUB_OUTPUT"
         env:
           GH_TOKEN: ${{ github.token }}
           VIDEO_ID: ${{ steps.resolve.outputs.vid }}
@@ -322,6 +338,8 @@ jobs:
           RELEASE_URL: ${{ steps.release.outputs.release_url }}
           NAME_COMPACT: ${{ steps.release.outputs.name_compact }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          DL_1080P_API: ${{ steps.release.outputs.dl_1080p }}
+          DL_FULL_API: ${{ steps.release.outputs.dl_full }}
           PIXEL_URL: ${{ steps.pixeldrain.outputs.url }}
           PAN123_URL: ${{ steps.pan123.outputs.url }}
           VIDEO_ID: ${{ steps.resolve.outputs.vid }}
@@ -335,12 +353,18 @@ jobs:
           ZH_TITLE=$(printf '%s' "$ZH_TITLE" | tr '\n\r' '  ' | sed 's/^ *//;s/ *$//')
           if [ -z "$ZH_TITLE" ]; then ZH_TITLE="$TITLE"; fi
           # GitHub Release 内 1080p 精简版「直接下载」直链：点开即下载，无需经过 Release 页面。
-          # 文件名可能含 ! + 等特殊字符，做百分号编码避免 URL 解析异常。
-          if [ -n "$RELEASE_URL" ]; then
-            ENC=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$NAME_COMPACT")
-            DL_1080P="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${ENC}"
-          else
-            DL_1080P=""
+          # 【2026-11-17 修复】直链直接用 Step4 从 API 读回的 browser_download_url（真实资源名），
+          # 不再本地拼 URL——GitHub 会把资源名里的 ! & 规范化成 '.'，拼出来的链接会 404。
+          # 仅当读回失败时才退回旧的拼接方式（此时白名单已剔除 ! &，通常也能对上）。
+          DL_1080P="${DL_1080P_API}"
+          DL_FULL="${DL_FULL_API}"
+          if [ -z "$DL_1080P" ]; then
+            if [ -n "$RELEASE_URL" ]; then
+              ENC=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$NAME_COMPACT")
+              DL_1080P="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${ENC}"
+            else
+              DL_1080P=""
+            fi
           fi
           # ── 新鲜度门：仅“今日更新”才推送 Server酱，避免补处理陈年 backlog 时误发第二条推送 ──
           # 背景：monitor 每轮只处理“最新未处理”视频，一天多次触发会把此前失败/漏处理的旧片当作
@@ -393,6 +417,9 @@ jobs:
             if [ -n "$DL_1080P" ]; then
               echo ""
               echo "📥 GitHub 1080p 直链(直接下载, 无需跳页): ${DL_1080P}"
+            fi
+            if [ -n "$DL_FULL" ]; then
+              echo "📥 GitHub 完整版直链(原始分辨率): ${DL_FULL}"
             fi
             echo ""
             echo "📄 字幕 zh.srt 见上述 Release 资产"
