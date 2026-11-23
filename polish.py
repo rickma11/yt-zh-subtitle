@@ -66,14 +66,35 @@ RULES = [
     (re.compile(r"(?<!\d):(?!\d)"), "："),
 ]
 
-# LLM 在长 system prompt（词表 + 20 条）下偶发对术语本身展开说明，
-# 输出「如果你需要…请提供更具体的问题…我会尽力」之类套话。
-# 这些不是字幕内容，必须在烧录前截掉；命中后保留套话前的最后一个完整句。
+# LLM 在长 system prompt（词表 + 20 条）下偶发把「待命话术 / 自述 / 规则复述 /
+# 词典释义 / 译者对照」当成口播译文输出（质检 2026-11-23 报告：三支视频共 19 处）。
+# 这些不是字幕内容，必须在烧录前截掉。
+# ⚠️ 绝不硬失败：validate_zh 对元说明只做软警告（11-10 事故教训）。这里只清洗，
+#    且只用「长短语 / 句式」命中，绝不拿日常口播高频词（如「应该是」「提供」）当 marker。
 _LLM_META_MARKERS = (
+    # —— 原有 10 条 ——
     "请提供更具体的问题", "请提供更多信息", "我会尽力", "我会尽我所能",
     "根据提供的术语", "在术语锁定表中", "作为AI", "作为人工智能",
     "希望这对你有帮助", "希望对你有帮助",
+    # —— 待命 / 引导话术 ——
+    "请提供你需要翻译", "请提供需要翻译", "请提供完整句子",
+    "如果后面有更多内容", "请提供完整句子以便",
+    # —— 过程 / 规则复述 ——
+    "根据术语锁定表", "根据你提供的术语", "对应的英文是", "应翻译为",
+    "保留英文标准拼写", "是人名，保留英文", "这是人名，保留",
+    # —— 词典释义 / 译者对照 ——
+    "这句话可以翻译为", "以下是对应的简体中文翻译", "以下是对应的中文翻译",
+    "以下是对应", "译为：", "译文：", "**译文**",
+    # —— 模型英文自述（大小写不敏感比对）——
+    "it seems like you're expecting a response",
+    "i've been provided with instructions",
+    "expecting a response in english",
 )
+# 「**译文**：XXX」「以下是对应的简体中文翻译：XXX」这类是「说明 + 分隔符 + 口播」，
+# 命中后应保留分隔符之后的口播内容，而不是整段删。
+_META_PREFIXES = ("**译文**", "译文：", "译为：", "简体中文翻译：", "中文翻译：")
+# 纯英文自述（无汉字）判定：需要同时含汉字判定，避免误伤正常中文口播。
+_HAN_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 
 # 日文假名 -> 中文音译兜底表。
 # 根因（2026-11-14 事故）：LLM 偶发把人名音译成片假名（帕ブロ / 玛リア娜），
@@ -122,16 +143,58 @@ def _kana_to_hanzi(text):
 
 
 def _strip_llm_meta(text):
-    """截掉 LLM 偶发输出的元说明套话；整段都是套话时退回「（听不清）」。"""
-    hits = [text.index(m) for m in _LLM_META_MARKERS if m in text]
+    """截掉 LLM 偶发输出的元说明 / 对话残留套话。
+
+    三档处理：
+    1. 「说明 + 分隔符 + 口播」（如 **译文**：XXX）：保留分隔符后的口播。
+    2. 套话前有口播内容：截掉套话，保留最后一个完整句。
+    3. 整段都是套话 / 英文自述：退回「（听不清）」占位，绝不留元话语进字幕。
+
+    绝不硬失败：本函数只清洗、不抛异常；正常口播（含「应该是」等高频词）不受影响，
+    因为 marker 全是长句式，且英文自述仅在「整段无汉字」时才判定。
+    """
+    if not text:
+        return text
+    low = text.lower()
+
+    # 1. 说明 + 分隔符 + 口播：保留分隔符后的真实口播
+    for sep in _META_PREFIXES:
+        pos = text.find(sep)
+        if pos < 0:
+            continue
+        tail = text[pos + len(sep):].strip().strip("：: ").strip()
+        # 去掉包裹引号（"请告诉我你的看法。" / '...'）
+        if len(tail) >= 2 and tail[0] in "\"'「“" and tail[-1] in "\"'」”":
+            tail = tail[1:-1].strip()
+        # tail 仍是套话 / 空 / 纯英文自述 -> 整段删（只查 tail 自身，别把分隔符 marker 算进去）
+        tail_low = tail.lower()
+        if not tail or any(m in tail_low for m in _LLM_META_MARKERS):
+            return "（听不清）"
+        return tail
+
+    # 2/3. 找所有 marker 的最早命中位置（marker 与文本都转小写，英文大小写不敏感）
+    hits = []
+    for m in _LLM_META_MARKERS:
+        pos = low.find(m.lower())
+        if pos >= 0:
+            hits.append(pos)
     if not hits:
         return text
     head = text[:min(hits)]
+
+    # 若命中点之前无任何内容（套话在段首），检查是否整段英文自述 -> 听不清
+    if not head.strip():
+        return "（听不清）"
+
+    # 保留套话前最后一个完整句
     idx = max(head.rfind("。"), head.rfind("！"), head.rfind("？"))
     if idx >= 0:
         head = head[:idx + 1]
     head = head.strip()
-    return head or "（听不清）"
+    # 头太短（<4 字）或无汉字：多半是套话残片，不留
+    if len(head) < 4 or not _HAN_RE.search(head):
+        return "（听不清）"
+    return head
 
 
 def preprocess(text):

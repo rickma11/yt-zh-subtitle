@@ -5,6 +5,19 @@
 > 球员、教练、俱乐部一律保留英文标准拼写，本表不产出中文译名。
 > 完整球员名单见仓库 `player_names_en.txt`（19713 人，供人工/离线复核）；本词表只列高频 ASR 误听形态。
 
+## A0. 字幕只留口播：AI 元话语 / 对话残留零容忍（最高优先级，先于一切词表）
+
+中文字幕段只能是「玩家对着镜头说的话」。读起来像翻译助手在对话、在交代流程、在解释怎么翻的，整段删除，不进字幕。六类必删：
+
+1. **待命/引导话术**：「请提供你需要翻译的英文字幕段落，我将根据术语锁定表翻译」「请提供需要翻译的英文内容」「如果后面有更多内容请提供完整句子」。
+2. **模型自述**：整段英文「It seems like you're expecting a response in English. However, I've been provided with instructions to translate...」。
+3. **过程与规则复述**：「XX 是人名保留英文标准拼写」「前腰对应英文 CAM，根据术语锁定表应译为前腰（CAM）」。
+4. **词典式释义**：一个词的多种含义、例句、用法拆解。
+5. **译者对照/注释括注**：「译为：Women's Champions League (女足欧冠)」「**译文**：……」。
+6. **待办/反问、整段大写英文残留**。
+
+自检触发词（命中即删整段）：请提供 / 我将根据 / 根据术语 / 对应的英文 / 标准拼写 / 译为 / 译文 / 以下是对应 / 如果你有 / 了解。请提供。宁可输出「（听不清）」也不输出上述内容。
+
 ## A. 四桶归位（遇到可疑词先归桶，顺序不许换）
 
 1. **人名桶**：紧跟 card / promo / icon / hero / evo / SBC / 评分数字；前有 it's / that's / we got / another；开包瞬间单独成句；"不是 X，是 Y"里被否定的一方；"某国籍/俱乐部/位置 + 词"。→ 写标准英文拼写或标（待核），禁止按字面译成食物、器官、天气、动作、职位。
@@ -62,6 +75,22 @@
 | Rush（任务条件用语） | 在Rush中通过完成奖励目标获取 | 在 Rush 中完成加成 |
 | rank 1（段位/排名） | rank 1（保留英文） | 顶级、第一名、排名第一 |
 | elite（段位） | 精英 | 顶级、高级 |
+| Icon | 传奇卡 | 传奇球星、超级巨星 |
+| Future Stars | 未来之星 | 明日之星 |
+| Quick Step | 健步如飞 | 疾风步 |
+| Incisive Pass | Incisive Pass（穿透传球） | 切入传球、敏锐的传球 |
+| Jockey | 跟防 | 骑师 |
+| stats / statistics | 数据 / 数据统计 | 统计数据 |
+| Thunderstruck | 雷霆万钧 | 冻结卡包 |
+| Scream card（单独出现） | 终极尖叫卡 | 尖叫卡（须带「终极」） |
+| Campaign Mix | 活动混合包 | 战役混合包、活动组合、活动混合刷新 |
+| Year in Review | 年度回顾 | — |
+| Squad Foundations | 阵容基石（待核官方中文名） | — |
+| Hero Pack | 英雄包 | — |
+| Walkout Animation | 爆卡出场动画 | 走动动画、走出动画 |
+| Promo Card | 活动卡 | 促销卡 |
+| Tradable / Non-tradable | 可交易 / 不可交易 | — |
+| L / W（口语评价） | 血亏 / 血赚 | 残留字母 L、W 不译 |
 
 ### B2 位置（只选一套，全篇不换）
 
@@ -163,5 +192,48 @@
 | Sam car | Sam Kerr |
 | Musa Caicedo | Moisés Caicedo |
 | a killing and Mbappe / a killing Mbappe | Kylian Mbappé |
+
+### C2 常见中文音译 → 还原英文标准拼写（禁止音译落字幕）
+
+| 中文音译（错） | 还原为 |
+| --- | --- |
+| 亚马尔 | Yamal |
+| 姆巴佩 | Mbappé |
+| 罗德里 | Rodri |
+| 库尔图瓦 | Courtois |
+| 奥巴拉克 | Oblak |
+| 本泽马 | Benzema |
+| 卡塞米罗 | Casemiro |
+| 普利希奇 | Pulisic |
+| 马内 | Mané |
+| 奥利塞 | Olise |
+| 魔笛 / 莫德里奇 | Modric |
+| 施洛特贝克 / 施赖克尔 | Schlotterbeck |
+| 玛罗尼亚 / 玛罗娜 / 玛丽安娜 | Mariona |
+| 哈利·凯恩 / 哈里·凯恩 | Kane |
+| 亚历克斯·斯科特·鲍姆思 | Alex Scott |
+| 摩根·罗杰斯 | Morgan Rogers |
+| 路易·斯凯利 | Louis Skelly |
+| 莱昂内尔·Messi | Messi |
+| 马奎inhos / 马尔奎inhos | Marquinhos |
+| HasegawaMessi | Hasegawa / Messi（分开） |
+
+> 半中半英（马奎inhos、莱昂内尔·Messi、HasegawaMessi）必须归一为标准英文拼写。
+> 「Silver / Silver card」是银卡稀有度，不是人名，禁止译成「加布里埃尔·银色」。
+
+### C3 已知 ASR 误听 → 还原（噪声桶，命中即还原，禁止硬猜中文）
+
+| ASR 误听 | 还原为 |
+| --- | --- |
+| kfc points / KFC 积分 / KFC 点 | FC 点（FC Points，不是肯德基、不是积分） |
+| hollow | Holographic（全息），禁「空档/空壳」 |
+| SPC | SBC（组队挑战缩写） |
+| sender back / center sender back | CB 中后卫 |
+| sentiment / center sentiment / centre sentiment | CM 中场（不是「情绪/心情」） |
+| rtg | RTG（保留英文；Live Events 才是实时赛事） |
+| court wall / court war | Courtois |
+| rice / rice with | Declan Rice |
+| peanut | Pina |
+| fatigue | Fati |
 
 > 未列入的新名字，按 N1–N5：识别人名 → 还原英文 → 不确定就保留原拼 +（待核）。
