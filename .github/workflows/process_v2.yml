@@ -76,11 +76,17 @@ jobs:
         id: resolve
         env:
           YT_COOKIES: ${{ secrets.YT_COOKIES }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -n "${{ inputs.video_id }}" ]; then
             echo "vid=${{ inputs.video_id }}" >> "$GITHUB_OUTPUT"
             echo "手动指定视频: ${{ inputs.video_id }}"
           else
+            # 【2026-11-23 修复重复推送】workflow_dispatch 在触发时刻快照 head_sha：
+            # cron 每小时触发、单次处理约 72 分钟，排队 run 触发时上一个 run 还没提交 state，
+            # 于是 checkout 到旧 state.json → 又选中同一视频 → 重复处理+推送。
+            # 选片前先从 main 拉最新维护表覆盖本地旧快照，让 monitor 看到刚被标记的视频。
+            python scripts/refresh_state.py
             python monitor.py
             VID=$(python -c "import json;d=json.load(open('new_videos.json'));print(d[0]['video_id'] if d else '')" 2>/dev/null || true)
             echo "监控到最新未处理视频: ${VID:-（无）}"
@@ -346,6 +352,7 @@ jobs:
           COVER_URL: ${{ steps.cover.outputs.url }}
           ZH_TITLE: ${{ steps.title_zh.outputs.zh_title }}
           INPUT_VIDEO_ID: ${{ inputs.video_id }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -z "$SERVERCHAN_KEY" ]; then echo "no SERVERCHAN_KEY, skip"; exit 0; fi
           TITLE=$(python -c "import json;print(json.load(open('work/notube_meta.json')).get('title','video'))" 2>/dev/null || echo "video")
@@ -364,6 +371,18 @@ jobs:
               DL_1080P="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${ENC}"
             else
               DL_1080P=""
+            fi
+          fi
+          # ── 推送幂等锁（2026-11-23 重复推送事故第二道防线）──────────────────
+          # 若远端 main 的 state.json 已标记当前 VID 为已处理，说明这是排队 run 的重复处理，
+          # 另一个 run 已经推送过同样内容 → 跳过本次推送，用户不会收到两条一模一样的通知。
+          # 手动指定 video_id 重跑时不检查（与新鲜度门的例外逻辑一致，保证补发可达）。
+          if [ -z "$INPUT_VIDEO_ID" ] && [ -n "$VIDEO_ID" ]; then
+            python scripts/already_processed.py
+            AP_RC=$?
+            if [ "$AP_RC" = "0" ]; then
+              echo "⏭️ 幂等锁命中：该视频已被处理并推送过，跳过本次 Server酱 推送"
+              exit 0
             fi
           fi
           # ── 新鲜度门：仅“今日更新”才推送 Server酱，避免补处理陈年 backlog 时误发第二条推送 ──
