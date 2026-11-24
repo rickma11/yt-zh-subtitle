@@ -378,12 +378,17 @@ jobs:
           # 另一个 run 已经推送过同样内容 → 跳过本次推送，用户不会收到两条一模一样的通知。
           # 手动指定 video_id 重跑时不检查（与新鲜度门的例外逻辑一致，保证补发可达）。
           if [ -z "$INPUT_VIDEO_ID" ] && [ -n "$VIDEO_ID" ]; then
-            python scripts/already_processed.py
-            AP_RC=$?
+            # 【2026-11-24 修复】already_processed.py 用退出码表达结果：0=已处理跳过 /
+            # 1=未处理放行 / 2=查询失败放行。CI 的 shell 是 `bash -e`，直接调用会在返回
+            # 1 或 2 时【立即终止整个步骤】，推送永远执行不到（11-24 事故：视频已发布
+            # Release 却没推送）。必须用 `|| AP_RC=$?` 捕获非零码，避免触发 -e。
+            AP_RC=0
+            python scripts/already_processed.py || AP_RC=$?
             if [ "$AP_RC" = "0" ]; then
               echo "⏭️ 幂等锁命中：该视频已被处理并推送过，跳过本次 Server酱 推送"
               exit 0
             fi
+            echo "ℹ️ 幂等锁结果码=${AP_RC}（1=未处理/2=查询失败，均放行推送）"
           fi
           # ── 新鲜度门：仅“今日更新”才推送 Server酱，避免补处理陈年 backlog 时误发第二条推送 ──
           # 背景：monitor 每轮只处理“最新未处理”视频，一天多次触发会把此前失败/漏处理的旧片当作
@@ -451,7 +456,9 @@ jobs:
       - name: 标记已处理并提交 state.json
         # 仅当发布真正成功(Step4 release outcome=success)才写维护表，
         # 避免 Step3.8 校验门失败/发布失败时仍写入 video_log 导致该视频永远被去重、漏抓
-        if: steps.release.outcome == 'success'
+        # 【2026-11-24 修复】加 always()：推送步骤(Step4d)失败不应阻断状态提交，否则
+        # state 不更新 → 下一轮 cron 又选中同一视频重复处理。只要 Release 成功就标记。
+        if: always() && steps.release.outcome == 'success'
         env:
           VID: ${{ steps.resolve.outputs.vid }}
         run: |
