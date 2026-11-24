@@ -9,6 +9,10 @@ on:
       tag:
         description: 'Release tag，例如 auto-20261117-pPc7YgGrKgA'
         required: true
+      pixel_url:
+        description: '免费网盘直链（可选，如 https://pixeldrain.com/api/file/xxx?download）'
+        required: false
+        default: ''
       note:
         description: '附言（可选）'
         required: false
@@ -30,6 +34,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
+          PIXEL_URL: ${{ inputs.pixel_url }}
           NOTE: ${{ inputs.note }}
         run: |
           if [ -z "$SERVERCHAN_KEY" ]; then echo "no SERVERCHAN_KEY, skip"; exit 0; fi
@@ -43,24 +48,39 @@ jobs:
           # 中文标题：尽力翻译（与主流程同一套 translate.translate），失败则回落英文原文
           ZH=$(python3 -c "import sys; from translate import translate; print(translate(sys.argv[1]))" "$TITLE" 2>/dev/null || true)
           if [ -z "$ZH" ]; then ZH="$TITLE"; fi
+          # 封面图：从 tag 末段取 VID（tag 形如 auto-YYYYMMDD-<VID>），拼 ytimg 直链，
+          # 与主流程 Step3.5 的 COVER_URL 完全一致，补发通知也有图。
+          VID="${TAG##*-}"
+          COVER_URL="https://i.ytimg.com/vi/${VID}/maxresdefault.jpg"
+          RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+          # 【2026-11-24 修复】正文结构对齐主流程 Step4d：标题(原文/中文)→封面图→
+          # 网盘直链→Release→1080p直链→完整版直链→字幕。此前补发用简化格式，
+          # 缺封面图/网盘链接，与主流程通知长得不一样（用户反馈）。
           DESP_FILE="$(mktemp)"
           {
-            echo "📦 GitHub Release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
-            if [ -n "$TITLE" ]; then echo "🎬 标题（原文）: ${TITLE}"; fi
-            if [ -n "$ZH" ]; then echo "🎬 标题（中文）: ${ZH}"; fi
+            echo "🎬 标题（原文）: ${TITLE}"
+            echo "🎬 标题（中文）: ${ZH}"
+            echo ""
+            echo "🖼️ 封面图: ${COVER_URL}"
+            if [ -n "$PIXEL_URL" ]; then
+              echo ""
+              echo "📦 免费网盘直链(需VPN/代理, 点开直接下载): ${PIXEL_URL}"
+            fi
+            echo ""
+            echo "📦 GitHub Release(完整版+1080p精简版+封面): ${RELEASE_URL}"
             echo ""
             echo "📥 GitHub 1080p 直链(直接下载, 无需跳页): ${REAL_URL}"
             if [ -n "$FULL_URL" ]; then
               echo "📥 GitHub 完整版直链(原始分辨率): ${FULL_URL}"
             fi
             echo ""
-            echo "📄 字幕 zh.srt 见 Release 资产"
+            echo "📄 字幕 zh.srt 见上述 Release 资产"
             if [ -n "$NOTE" ]; then
               echo ""
               echo "📝 ${NOTE}"
             fi
           } > "$DESP_FILE"
           curl -s "https://sctapi.ftqq.com/${SERVERCHAN_KEY}.send" \
-            --data-urlencode "title=视频下载直链（已修正链接）" \
+            --data-urlencode "title=新视频处理完成（已烧录中文字幕）" \
             --data-urlencode "desp@${DESP_FILE}" || true
           rm -f "$DESP_FILE"
